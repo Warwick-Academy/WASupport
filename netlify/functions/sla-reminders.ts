@@ -20,7 +20,7 @@ type Ticket = {
   ref: string;
   subject: string;
   description: string;
-  department: 'IT' | 'FAC' | 'HS';
+  department: 'IT' | 'FAC' | 'AV' | 'HS';
   priority: string;
   status: string;
   assignee_id: string | null;
@@ -47,6 +47,7 @@ const PRIORITY_LABEL: Record<string, string> = {
 const DEPT_LABEL: Record<string, string> = {
   IT: 'IT',
   FAC: 'Facilities',
+  AV: 'Audio Visual',
   HS: 'Health & Safety',
 };
 

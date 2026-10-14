@@ -45,7 +45,21 @@ function mapPriority(value: string) {
 }
 
 function mapStatus(value: string) {
-  return value.toLowerCase() === 'closed' ? 'closed' : 'open';
+  const normalized = value.trim().toLowerCase();
+  const statuses: Record<string, string> = {
+    open: 'open',
+    closed: 'closed',
+    resolved: 'resolved',
+    'in progress': 'in_progress',
+    in_progress: 'in_progress',
+    'on hold': 'on_hold',
+    on_hold: 'on_hold',
+    'awaiting triage': 'awaiting_triage',
+    awaiting_triage: 'awaiting_triage',
+  };
+  const status = statuses[normalized];
+  if (!status) throw new Error(`Unsupported Spiceworks status: "${value}"`);
+  return status;
 }
 
 function parseDate(value: string): string | null {
@@ -109,6 +123,9 @@ export const handler: Handler = async (event) => {
   if (body.rows.some((row) => !row || typeof row !== 'object' || Array.isArray(row))) {
     return json(400, { error: 'Every row must be an object' });
   }
+  if (body.rows.some((row) => !Object.hasOwn(row as object, 'Assigned To'))) {
+    return json(400, { error: 'The CSV must include the Assigned To column. Blank values are allowed.' });
+  }
 
   const supabaseUrl = env('SUPABASE_URL').replace(/\/$/, '');
   const serviceKey = env('SUPABASE_SERVICE_ROLE_KEY');
@@ -128,24 +145,30 @@ export const handler: Handler = async (event) => {
   if (profiles[0]?.role !== 'admin') return json(403, { error: 'Admin only' });
 
   const importedAt = new Date().toISOString();
-  const mapped = (body.rows as CsvRow[])
-    .map((row) => mapRow(row, importedAt))
-    .filter((row): row is NonNullable<typeof row> => row !== null);
+  let mapped: ReturnType<typeof mapRow>[];
+  try {
+    mapped = (body.rows as CsvRow[])
+      .map((row) => mapRow(row, importedAt))
+      .filter((row): row is NonNullable<typeof row> => row !== null);
+  } catch (error) {
+    return json(400, {
+      error: error instanceof Error ? error.message : 'Unsupported Spiceworks status',
+    });
+  }
   const invalid = body.rows.length - mapped.length;
 
   if (mapped.length === 0) return json(200, { inserted: 0, skipped: 0, invalid });
 
   const insertResponse = await fetch(
-    `${supabaseUrl}/rest/v1/tickets?on_conflict=legacy_ref&select=legacy_ref`,
+    `${supabaseUrl}/rest/v1/rpc/import_spiceworks_tickets`,
     {
       method: 'POST',
       headers: {
         apikey: serviceKey,
         Authorization: `Bearer ${serviceKey}`,
         'content-type': 'application/json',
-        Prefer: 'resolution=ignore-duplicates,return=representation',
       },
-      body: JSON.stringify(mapped),
+      body: JSON.stringify({ p_tickets: mapped }),
     },
   );
 
@@ -156,10 +179,15 @@ export const handler: Handler = async (event) => {
     });
   }
 
-  const insertedRows = (await insertResponse.json()) as { legacy_ref: string }[];
+  const result = await insertResponse.json() as {
+    inserted: number;
+    skipped: number;
+    updated: number;
+    assigned: number;
+    unmatched: Array<{ legacy_ref: string; name: string; department: string }>;
+  };
   return json(200, {
-    inserted: insertedRows.length,
-    skipped: mapped.length - insertedRows.length,
+    ...result,
     invalid,
   });
 };

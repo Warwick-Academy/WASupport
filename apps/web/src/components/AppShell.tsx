@@ -1,10 +1,25 @@
-import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { useState } from 'react';
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { ROLE_LABEL } from '../lib/types';
+import { ROLE_DEPARTMENT, TICKET_DEPARTMENTS, type TicketDepartment } from '../lib/types';
 
 export default function AppShell() {
-  const { user, role, isStaff, isAdmin, isAvAdmin, isManager, signOut } = useAuth();
+  const {
+    user,
+    profile,
+    role,
+    isTicketStaff,
+    isAdmin,
+    isAvAdmin,
+    isManager,
+    impersonation,
+    stopImpersonation,
+    signOut,
+  } = useAuth();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const [impersonationError, setImpersonationError] = useState<string | null>(null);
 
   async function handleSignOut() {
     await signOut();
@@ -16,9 +31,40 @@ export default function AppShell() {
       'text-sm transition-colors duration-200',
       isActive ? 'text-white font-medium' : 'text-slate-300 hover:text-white',
     ].join(' ');
+  const roleDepartment = role ? ROLE_DEPARTMENT[role] : null;
+  const canViewReports = isAdmin ||
+    (roleDepartment !== null && roleDepartment !== undefined && TICKET_DEPARTMENTS.includes(roleDepartment as TicketDepartment)) ||
+    (role === 'manager' && !!profile?.department && TICKET_DEPARTMENTS.includes(profile.department as TicketDepartment));
 
   return (
     <div className="min-h-screen">
+      {impersonation && (
+        <div className="flex flex-wrap items-center justify-between gap-3 bg-amber-100 px-6 py-2 text-sm text-amber-950">
+          <p>
+            Emulating <strong>{impersonation.targetEmail}</strong>
+            {impersonation.targetDepartment ? ` · ${impersonation.targetDepartment}` : ''}
+            {' '}· Reason: {impersonation.reason}
+          </p>
+          <div className="flex items-center gap-3">
+            {impersonationError && <span role="alert" className="text-rose-700">{impersonationError}</span>}
+            <button
+              type="button"
+              onClick={async () => {
+                setImpersonationError(null);
+                try {
+                  await stopImpersonation();
+                  navigate('/admin/users', { replace: true });
+                } catch (error) {
+                  setImpersonationError(error instanceof Error ? error.message : 'Could not end emulation.');
+                }
+              }}
+              className="rounded border border-amber-800 px-3 py-1 text-xs font-semibold text-amber-950 hover:bg-amber-200"
+            >
+              End emulation
+            </button>
+          </div>
+        </div>
+      )}
       <header
         className="bg-[#1a2744] text-white"
         style={{ borderBottom: '1px solid #2a3a5c' }}
@@ -45,14 +91,14 @@ export default function AppShell() {
             <NavLink to="/videos" className={linkClass}>
               Videos
             </NavLink>
-            {isStaff && (
-              <NavLink to="/queue" className={linkClass}>
-                Queue
-              </NavLink>
-            )}
-            {isStaff && (
+            {isTicketStaff && (
               <NavLink to="/dashboard" className={linkClass}>
                 Dashboard
+              </NavLink>
+            )}
+            {canViewReports && (
+              <NavLink to="/reports" className={linkClass}>
+                Reports
               </NavLink>
             )}
             {(isAvAdmin || isAdmin) && (
@@ -70,14 +116,14 @@ export default function AppShell() {
                 Categories
               </NavLink>
             )}
-            {isManager && (
+            {isAdmin && (
               <NavLink to="/admin/locations" className={linkClass}>
                 Locations
               </NavLink>
             )}
-            {isManager && (
+            {isManager && isAdmin && (
               <NavLink to="/admin/notifications" className={linkClass}>
-                Notifications
+                Email log
               </NavLink>
             )}
             {isAdmin && (
@@ -85,9 +131,11 @@ export default function AppShell() {
                 Import
               </NavLink>
             )}
-            <NavLink to="/status" className={linkClass}>
-              Status
-            </NavLink>
+            {(!isManager || isAdmin) && (
+              <NavLink to="/status" className={linkClass}>
+                Status
+              </NavLink>
+            )}
 
             <NavLink to="/new" className="btn-pill">
               + New ticket
@@ -116,7 +164,7 @@ export default function AppShell() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-6 py-10">
+      <main className={`mx-auto ${pathname === '/tickets' && isTicketStaff ? 'max-w-[1600px]' : 'max-w-6xl'} px-6 py-10`}>
         <Outlet />
       </main>
     </div>

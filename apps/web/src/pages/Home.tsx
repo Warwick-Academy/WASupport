@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 
 type Tile = {
@@ -53,8 +53,13 @@ const TILES: Tile[] = [
 ];
 
 export default function Home() {
-  const { profile, isStaff } = useAuth();
+  const { profile, user, isTicketStaff, isManager, profileLoading } = useAuth();
   const greeting = profile?.full_name?.split(' ')[0] ?? '';
+
+  if (user && profileLoading) {
+    return <div className="p-6 text-sm text-slate-500">Loading your dashboard…</div>;
+  }
+  if (isManager) return <Navigate to="/dashboard" replace />;
 
   return (
     <section className="mx-auto max-w-5xl">
@@ -85,15 +90,15 @@ export default function Home() {
         ))}
       </div>
 
-      {isStaff && (
+      {isTicketStaff && (
         <div className="mt-10">
           <h3 className="text-sm font-medium uppercase tracking-wide text-slate-500">Staff shortcuts</h3>
           <div className="mt-3 flex flex-wrap gap-2">
             <Link to="/tickets" className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50">
               My tickets
             </Link>
-            <Link to="/queue" className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50">
-              Queue
+            <Link to="/tickets" className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50">
+              Tickets
             </Link>
             <Link to="/dashboard" className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50">
               Dashboard

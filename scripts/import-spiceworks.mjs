@@ -9,10 +9,9 @@
  * (the service role key bypasses RLS so we can write historical rows
  * without an auth user).
  *
- * Idempotent: rows are matched on legacy_ref (Spiceworks "Ticket Number")
- * and skipped if already imported.
+ * Existing assignments are preserved; missing assignees are filled on re-import.
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parse } from 'csv-parse/sync';
 import { createClient } from '@supabase/supabase-js';
@@ -50,9 +49,20 @@ function mapPriority(p) {
 
 function mapStatus(s) {
   const v = (s ?? '').trim().toLowerCase();
-  if (v === 'closed') return 'closed';
-  if (v === 'open') return 'open';
-  return 'open';
+  const statuses = {
+    open: 'open',
+    closed: 'closed',
+    resolved: 'resolved',
+    'in progress': 'in_progress',
+    in_progress: 'in_progress',
+    'on hold': 'on_hold',
+    on_hold: 'on_hold',
+    'awaiting triage': 'awaiting_triage',
+    awaiting_triage: 'awaiting_triage',
+  };
+  const status = statuses[v];
+  if (!status) throw new Error(`Unsupported Spiceworks status: "${s ?? ''}"`);
+  return status;
 }
 
 function parseDate(s) {
@@ -84,48 +94,8 @@ const rows = parse(raw, {
 });
 
 console.log(`Parsed ${rows.length} rows from ${csvPath}`);
-
-// ---------- existing legacy_refs (skip already-imported) ----------
-const existing = new Set();
-{
-  let from = 0;
-  const pageSize = 1000;
-  while (true) {
-    const { data, error } = await supabase
-      .from('tickets')
-      .select('legacy_ref')
-      .not('legacy_ref', 'is', null)
-      .range(from, from + pageSize - 1);
-    if (error) throw error;
-    if (!data || data.length === 0) break;
-    for (const r of data) existing.add(r.legacy_ref);
-    if (data.length < pageSize) break;
-    from += pageSize;
-  }
-}
-console.log(`Already imported: ${existing.size}`);
-
-// ---------- max refs per dept (so we can assign refs client-side and
-// skip the trigger entirely — avoids sequence/concurrency issues) ------
-const nextN = { IT: 1, FAC: 1, HS: 1 };
-for (const d of ['IT', 'FAC', 'HS']) {
-  const { data, error } = await supabase
-    .from('tickets')
-    .select('ref')
-    .like('ref', `${d}-%`)
-    .order('ref', { ascending: false })
-    .limit(1);
-  if (error) throw error;
-  if (data && data[0]?.ref) {
-    const m = data[0].ref.match(/-(\d+)$/);
-    if (m) nextN[d] = parseInt(m[1], 10) + 1;
-  }
-}
-console.log('Starting refs from:', nextN);
-
-function makeRef(dep) {
-  const n = nextN[dep]++;
-  return `${dep}-${String(n).padStart(4, '0')}`;
+if (!rows[0] || !Object.hasOwn(rows[0], 'Assigned To')) {
+  throw new Error('The CSV must include the Assigned To column. Blank values are allowed.');
 }
 
 // ---------- map rows ----------
@@ -134,7 +104,6 @@ const toInsert = [];
 for (const r of rows) {
   const legacyRef = String(r['Ticket Number'] ?? '').trim();
   if (!legacyRef) continue;
-  if (existing.has(legacyRef)) continue;
 
   const department = mapDepartment(r['Category']);
   const status = mapStatus(r['Status']);
@@ -143,7 +112,6 @@ for (const r of rows) {
 
   toInsert.push({
     legacy_ref: legacyRef,
-    ref: makeRef(department),
     department,
     subject: (r['Summary'] || '(no subject)').slice(0, 500),
     description: r['Description'] || '',
@@ -164,24 +132,50 @@ for (const r of rows) {
     closed_at: closedAt,
   });
 }
-console.log(`To insert: ${toInsert.length}`);
+console.log(`Rows to process: ${toInsert.length}`);
 
 // ---------- insert in batches ----------
 // Tickets currently auto-assign a ref via trigger using ticket_seq_*; we'll
 // let that happen so new refs don't clash with existing/future tickets.
 let inserted = 0;
 let failed = 0;
+let updated = 0;
+let assigned = 0;
+let skipped = 0;
+const unmatched = [];
 for (let i = 0; i < toInsert.length; i += BATCH) {
   const batch = toInsert.slice(i, i + BATCH);
-  const { error, count } = await supabase
-    .from('tickets')
-    .insert(batch, { count: 'exact' });
+  const { error, data } = await supabase.rpc('import_spiceworks_tickets', { p_tickets: batch });
   if (error) {
     failed += batch.length;
     console.error(`Batch ${i / BATCH + 1} failed:`, error.message);
   } else {
-    inserted += count ?? batch.length;
+    inserted += data.inserted;
+    updated += data.updated;
+    assigned += data.assigned;
+    skipped += data.skipped;
+    unmatched.push(...data.unmatched);
     process.stdout.write(`  +${inserted}/${toInsert.length}\r`);
   }
 }
-console.log(`\nDone. inserted=${inserted} failed=${failed} skipped=${existing.size}`);
+console.log(`\nDone. inserted=${inserted} failed=${failed} existing=${skipped} filled=${updated} assignedNew=${assigned}`);
+if (unmatched.length) {
+  console.log('Unmatched or ambiguous assignees (no assignment guessed):');
+  const groups = new Map();
+  for (const row of unmatched) {
+    const key = `${row.department}:${row.name}`;
+    const group = groups.get(key) ?? { department: row.department, name: row.name, tickets: 0 };
+    group.tickets += 1;
+    groups.set(key, group);
+  }
+  console.table([...groups.values()]);
+  const csvRows = [['Ticket Number', 'Assigned To', 'Department'], ...unmatched.map((row) => [row.legacy_ref, row.name, row.department])];
+  const csv = csvRows.map((row) => row.map((value) => {
+    const safe = /^[=+\-@]/.test(value) ? `'${value}` : value;
+    return `"${safe.replace(/"/g, '""')}"`;
+  }).join(',')).join('\r\n');
+  const reportPath = resolve(`${csvPath}.unmatched-assignees.csv`);
+  writeFileSync(reportPath, csv, 'utf8');
+  console.log(`Unmatched ticket details: ${reportPath}`);
+}
+if (failed) process.exitCode = 1;

@@ -35,6 +35,16 @@ function mapDepartment(category) {
   return 'IT';
 }
 
+const crossDepartmentNames = {
+  IT: new Set(['facilities', 'health and safety']),
+  FAC: new Set(['it', 'health and safety']),
+  HS: new Set(['it', 'facilities']),
+};
+
+function normalizeCategoryName(name) {
+  return name.toLowerCase().replace(/&/g, 'and').replace(/\s+/g, ' ').trim();
+}
+
 const raw = readFileSync(resolve(csvPath), 'utf8');
 const rows = parse(raw, {
   bom: true,
@@ -61,7 +71,9 @@ const locations = new Set();
 for (const r of rows) {
   const dep = mapDepartment(r.Category);
   const sub = (r.Category_2 ?? '').trim();
-  if (sub) catByDept[dep].add(sub);
+  if (sub && !crossDepartmentNames[dep].has(normalizeCategoryName(sub))) {
+    catByDept[dep].add(sub);
+  }
   const loc = (r['Room Number / Location'] ?? '').trim();
   if (loc) locations.add(loc);
 }

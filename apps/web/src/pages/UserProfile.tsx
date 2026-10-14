@@ -7,6 +7,7 @@ import {
   DEPARTMENT_LABEL,
   PRIORITY_BADGE,
   PRIORITY_LABEL,
+  ROLE_DEPARTMENT,
   ROLE_LABEL,
   STATUS_BADGE,
   STATUS_LABEL,
@@ -28,7 +29,7 @@ const ASSIGNABLE_ROLES: UserRole[] = [
   'admin',
 ];
 
-const DEPARTMENTS: Department[] = ['IT', 'FAC', 'HS'];
+const DEPARTMENTS: Department[] = ['IT', 'FAC', 'AV', 'HS'];
 
 export default function UserProfile() {
   const { id: idParam } = useParams<{ id: string }>();
@@ -156,6 +157,8 @@ export default function UserProfile() {
 
   const submitted = (tickets ?? []).filter((t) => t.submitter_id === id);
   const assigned = (tickets ?? []).filter((t) => t.assignee_id === id);
+  const impliedDept = ROLE_DEPARTMENT[userRole];
+  const deptLocked = userRole === 'submitter' || !!impliedDept;
 
   return (
     <section>
@@ -222,15 +225,15 @@ export default function UserProfile() {
           </select>
         </div>
         <div>
-          <label htmlFor="up-dept" className="field-label">Assignable department</label>
+          <label htmlFor="up-dept" className="field-label">Department</label>
           <select
             id="up-dept"
-            value={department}
+            value={userRole === 'submitter' ? '' : impliedDept ?? department}
             onChange={(e) => setDepartment(e.target.value as Department | '')}
             className="field-select"
-            disabled={!canEditRoleAndDept}
+            disabled={!canEditRoleAndDept || deptLocked}
           >
-            <option value="">— None —</option>
+            <option value="">{userRole === 'manager' ? '— All departments —' : '— None —'}</option>
             {DEPARTMENTS.map((d) => (
               <option key={d} value={d}>
                 {DEPARTMENT_LABEL[d]}
@@ -239,7 +242,9 @@ export default function UserProfile() {
           </select>
           <p className="mt-1 text-xs text-slate-500">
             {canEditRoleAndDept
-              ? 'Used for department-scoped filters and assignment.'
+              ? deptLocked
+                ? 'Set automatically from the role.'
+                : 'For managers: the department they manage (receives unrouted tickets).'
               : 'Contact an administrator to change your role or department.'}
           </p>
         </div>

@@ -1,5 +1,9 @@
 # AcademyDesk — Build Walkthrough
 
+This is the historical build checklist, not a record of current service access.
+For home/school synchronization and current credential setup, use the
+[README](./README.md#syncing-home-and-school-computers).
+
 This file is the running checklist we work through together. Each stage has
 **(a)** what to provision in third-party dashboards (things only you can do)
 and **(b)** what we change in the repo (I do these). Tick items as we go.

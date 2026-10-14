@@ -8,7 +8,7 @@ type LocationRow = Location & { is_active: boolean };
 const PAGE_SIZE = 100;
 
 export default function AdminLocations() {
-  const { isManager } = useAuth();
+  const { isManager, isAdmin } = useAuth();
   const qc = useQueryClient();
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(0);
@@ -48,6 +48,16 @@ export default function AdminLocations() {
       if (!supabase) throw new Error('not ready');
       const { id, ...fields } = patch;
       const { error } = await supabase.from('locations').update(fields).eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-locations'] }),
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const remove = useMutation({
+    mutationFn: async (id: string) => {
+      if (!supabase) throw new Error('not ready');
+      const { error } = await supabase.from('locations').delete().eq('id', id);
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-locations'] }),
@@ -127,11 +137,25 @@ export default function AdminLocations() {
                 className={`field-sm flex-1 ${l.is_active ? '' : 'text-slate-400 line-through'}`}
               />
               <button
+                type="button"
                 onClick={() => update.mutate({ id: l.id, is_active: !l.is_active })}
                 className="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-100"
               >
                 {l.is_active ? 'Disable' : 'Enable'}
               </button>
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (window.confirm(`Delete "${l.building}"? Tickets using it will no longer have a location.`)) {
+                      remove.mutate(l.id);
+                    }
+                  }}
+                  className="rounded-md border border-rose-200 px-2 py-1 text-xs font-medium text-rose-700 transition hover:bg-rose-50"
+                >
+                  Delete
+                </button>
+              )}
             </li>
           ))}
           {q.data && q.data.rows.length === 0 && (

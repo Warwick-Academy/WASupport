@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Plus, X } from 'lucide-react';
 import AvRecurringAdmin from '../components/AvRecurringAdmin';
 import { useAuth } from '../lib/auth';
 import { supabase } from '../lib/supabase';
@@ -41,8 +42,14 @@ function displayDate(value: string) {
 
 export default function AvAdmin() {
   const { isAdmin, isAvAdmin } = useAuth();
-  const [searchParams] = useSearchParams();
+  const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
   const selectedId = searchParams.get('request');
+  const detailsDialog = useRef<HTMLDialogElement>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [requesterSearch, setRequesterSearch] = useState('');
+  const [requesterEmail, setRequesterEmail] = useState('');
   const [month, setMonth] = useState(() => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
@@ -52,16 +59,35 @@ export default function AvAdmin() {
     queryKey: ['av-admin-requests'],
     queryFn: async (): Promise<AvRequestRecord[]> => {
       if (!supabase) throw new Error('Supabase not configured');
-      const { data, error } = await supabase
-        .from('av_requests')
-        .select('id,requester_name,requester_email,requested_date,setup_time,equipment,music_request,location,details,links,calendar_status,created_at')
-        .order('requested_date', { ascending: true })
-        .order('setup_time', { ascending: true })
-        .limit(500);
-      if (error) throw error;
-      return data as AvRequestRecord[];
+      const records: AvRequestRecord[] = [];
+      for (let offset = 0; ; offset += 500) {
+        const { data, error } = await supabase
+          .from('av_requests')
+          .select('id,requester_name,requester_email,requested_date,setup_time,equipment,music_request,location,details,links,calendar_status,created_at')
+          .order('requested_date', { ascending: false })
+          .order('setup_time', { ascending: false })
+          .order('created_at', { ascending: false })
+          .order('id')
+          .range(offset, offset + 499);
+        if (error) throw error;
+        const batch = (data ?? []) as AvRequestRecord[];
+        records.push(...batch);
+        if (batch.length < 500) return records;
+      }
     },
   });
+
+  const requesters = Array.from(new Map(
+    (requests.data ?? []).map((request) => [
+      request.requester_email.toLowerCase(),
+      { email: request.requester_email.toLowerCase(), name: request.requester_name },
+    ]),
+  ).values()).sort((left, right) => left.name.localeCompare(right.name));
+  const search = requesterSearch.trim().toLowerCase();
+  const filteredRequests = (requests.data ?? []).filter((request) =>
+    (!requesterEmail || request.requester_email.toLowerCase() === requesterEmail) &&
+    (!search || request.requester_name.toLowerCase().includes(search) || request.requester_email.toLowerCase().includes(search)),
+  );
 
   const files = useQuery({
     queryKey: ['av-admin-request-files', selectedId],
@@ -85,6 +111,38 @@ export default function AvAdmin() {
   });
 
   const selected = requests.data?.find((request) => request.id === selectedId) ?? null;
+  useEffect(() => {
+    const dialog = detailsDialog.current;
+    if (selected && dialog && !dialog.open) dialog.showModal();
+    return () => { if (dialog?.open) dialog.close(); };
+  }, [selected]);
+
+  useEffect(() => { setDeleteError(null); }, [selectedId]);
+
+  function closeDetails() {
+    const next = new URLSearchParams(searchParams);
+    next.delete('request');
+    setSearchParams(next);
+  }
+
+  async function deleteRequest(id: string) {
+    if (!supabase || isDeleting || !window.confirm('Delete this AV request?')) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      const { data, error } = await supabase.from('av_requests').delete().eq('id', id).select('id');
+      if (error) throw error;
+      if (data?.length !== 1) throw new Error('The request was not deleted. Your account may not have permission, or the request no longer exists.');
+      queryClient.setQueryData<AvRequestRecord[]>(['av-admin-requests'], (current) => current?.filter((request) => request.id !== id));
+      if (selectedId === id) closeDetails();
+      await queryClient.invalidateQueries({ queryKey: ['av-admin-requests'] });
+      await queryClient.invalidateQueries({ queryKey: ['my-av-request-summaries'] });
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : 'Could not delete this AV request.');
+    } finally {
+      setIsDeleting(false);
+    }
+  }
   const byDate = new Map<string, AvRequestRecord[]>();
   for (const request of requests.data ?? []) {
     const current = byDate.get(request.requested_date) ?? [];
@@ -107,21 +165,38 @@ export default function AvAdmin() {
           <h1 className="page-title">Audio Visual Admin</h1>
           <p className="page-subtitle">Review submitted AV requests and scheduled setup dates.</p>
         </div>
+        <Link to="/av-request" className="btn-primary">
+          <Plus aria-hidden="true" size={16} />
+          New AV ticket
+        </Link>
       </div>
 
       {requests.error && <p className="alert-error">{requests.error instanceof Error ? requests.error.message : 'Could not load AV requests.'}</p>}
       {requests.isLoading && <p className="text-sm text-slate-500">Loading AV requests...</p>}
 
       {selected && (
-        <section className="mb-8 card-pad" id={`request-${selected.id}`}>
+        <dialog
+          ref={detailsDialog}
+          aria-labelledby="av-details-title"
+          onCancel={(event) => { event.preventDefault(); closeDetails(); }}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') { event.preventDefault(); closeDetails(); }
+          }}
+          className="fixed inset-0 m-auto max-h-[85dvh] w-[calc(100%-2rem)] max-w-3xl overflow-y-auto rounded-lg border-0 bg-white p-6 text-slate-900 shadow-xl backdrop:bg-slate-950/50"
+        >
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <p className="text-xs font-semibold uppercase text-slate-500">Request details</p>
-              <h2 className="mt-1 text-xl font-semibold text-brand-navy">{selected.location}</h2>
+              <h2 id="av-details-title" className="mt-1 text-xl font-semibold text-brand-navy">{selected.location}</h2>
               <p className="mt-1 text-sm text-slate-600">{displayDate(selected.requested_date)} at {selected.setup_time.slice(0, 5)}</p>
             </div>
-            <Link to="/admin/av" className="text-sm font-medium text-brand-navy hover:underline">Close details</Link>
+            <div className="flex items-center gap-4">
+              <Link to={`/av-request?request=${selected.id}`} className="text-sm font-medium text-brand-navy hover:underline">Edit</Link>
+              <button type="button" disabled={isDeleting} onClick={() => void deleteRequest(selected.id)} className="text-sm font-medium text-rose-700 hover:underline disabled:opacity-50">{isDeleting ? 'Deleting...' : 'Delete'}</button>
+              <button type="button" onClick={closeDetails} title="Close details" aria-label="Close details" className="rounded-md p-2 text-brand-navy hover:bg-slate-100"><X size={20} aria-hidden="true" /></button>
+            </div>
           </div>
+          {deleteError && <p role="alert" className="mt-4 alert-error">{deleteError}</p>}
           <dl className="mt-6 grid gap-5 md:grid-cols-2">
             <div><dt className="field-label">Requester</dt><dd>{selected.requester_name}<br /><a className="text-sm text-brand-navy hover:underline" href={`mailto:${selected.requester_email}`}>{selected.requester_email}</a></dd></div>
             <div><dt className="field-label">Date requested for:</dt><dd>{displayDate(selected.requested_date)} at {selected.setup_time.slice(0, 5)}</dd></div>
@@ -132,16 +207,44 @@ export default function AvAdmin() {
           {selected.links.length > 0 && <div className="mt-5"><p className="field-label">Links</p><ul className="space-y-1">{selected.links.map((link) => <li key={link}><a href={link} target="_blank" rel="noreferrer" className="break-all text-sm text-brand-navy hover:underline">{link}</a></li>)}</ul></div>}
           {files.data && files.data.length > 0 && <div className="mt-5"><p className="field-label">Files</p><ul className="space-y-1">{files.data.map((file) => <li key={file.id}><a href={file.url} target="_blank" rel="noreferrer" className="text-sm text-brand-navy hover:underline">{file.original_name} ({(file.size_bytes / 1024 / 1024).toFixed(1)} MB)</a></li>)}</ul></div>}
           {files.isLoading && <p className="mt-5 text-sm text-slate-500">Loading files...</p>}
-        </section>
+          {files.error && <p role="alert" className="mt-5 alert-error">Could not load request files.</p>}
+        </dialog>
       )}
 
       <section>
         <h2 className="text-lg font-semibold text-brand-navy">AV ticket requests</h2>
+        <div className="mt-4 flex flex-wrap items-end gap-3">
+          <label className="block">
+            <span className="field-label">Search requester</span>
+            <input
+              type="search"
+              value={requesterSearch}
+              onChange={(event) => setRequesterSearch(event.target.value)}
+              placeholder="Name or email"
+              className="field-sm"
+            />
+          </label>
+          <label className="block min-w-0">
+            <span className="field-label">Requester</span>
+            <select
+              value={requesterEmail}
+              onChange={(event) => setRequesterEmail(event.target.value)}
+              className="field-select-sm max-w-full"
+            >
+              <option value="">All requesters</option>
+              {requesters.map((requester) => (
+                <option key={requester.email} value={requester.email}>
+                  {requester.name} ({requester.email})
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
         <div className="mt-4 data-table-wrap">
           <table className="data-table">
             <thead><tr><th>Date requested for:</th><th>Requester</th><th>Location</th><th>Equipment</th><th></th></tr></thead>
             <tbody>
-              {(requests.data ?? []).map((request) => (
+              {filteredRequests.map((request) => (
                 <tr key={request.id}>
                   <td className="whitespace-nowrap">{displayDate(request.requested_date)}<br /><span className="text-xs text-slate-500">{request.setup_time.slice(0, 5)}</span></td>
                   <td>{request.requester_name}</td>
@@ -150,7 +253,7 @@ export default function AvAdmin() {
                   <td><Link to={`/admin/av?request=${request.id}`} className="font-medium text-brand-navy hover:underline">View</Link></td>
                 </tr>
               ))}
-              {requests.data?.length === 0 && <tr><td colSpan={5} className="text-center text-slate-500">No AV requests yet.</td></tr>}
+              {requests.data && filteredRequests.length === 0 && <tr><td colSpan={5} className="text-center text-slate-500">{requests.data.length === 0 ? 'No AV requests yet.' : 'No AV requests match this requester.'}</td></tr>}
             </tbody>
           </table>
         </div>

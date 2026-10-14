@@ -1,4 +1,4 @@
-import { Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import AppShell from './components/AppShell';
 import RequireAuth from './components/RequireAuth';
 import SignIn from './pages/SignIn';
@@ -7,7 +7,6 @@ import TicketsList from './pages/TicketsList';
 import NewTicket from './pages/NewTicket';
 import TicketDetail from './pages/TicketDetail';
 import StatusPage from './pages/StatusPage';
-import Queue from './pages/Queue';
 import AdminUsers from './pages/AdminUsers';
 import UserProfile from './pages/UserProfile';
 import AdminCategories from './pages/AdminCategories';
@@ -26,6 +25,17 @@ import RequireAvAdmin from './components/RequireAvAdmin';
 import AdminTicketImport from './pages/AdminTicketImport';
 import AvRequest from './pages/AvRequest';
 import AvAdmin from './pages/AvAdmin';
+import DepartmentReports from './pages/DepartmentReports';
+
+function TicketsRoute() {
+  const { search } = useLocation();
+  return <TicketsList key={search} />;
+}
+
+function LegacyQueueRedirect() {
+  const { search, hash } = useLocation();
+  return <Navigate to={`/tickets${search}${hash}`} replace />;
+}
 
 export default function App() {
   return (
@@ -35,13 +45,14 @@ export default function App() {
       <Route element={<RequireAuth />}>
         <Route element={<AppShell />}>
           <Route path="/" element={<Home />} />
-          <Route path="/tickets" element={<TicketsList />} />
+          <Route path="/tickets" element={<TicketsRoute />} />
           <Route path="/new" element={<NewTicket />} />
           <Route path="/av-request" element={<AvRequest />} />
           <Route path="/tickets/:id" element={<TicketDetail />} />
-          <Route path="/queue" element={<Queue />} />
+          <Route path="/queue" element={<LegacyQueueRedirect />} />
           <Route element={<RequireStaff />}>
             <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/reports" element={<DepartmentReports />} />
           </Route>
           <Route element={<RequireAvAdmin />}>
             <Route path="/admin/av" element={<AvAdmin />} />

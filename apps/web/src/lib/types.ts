@@ -1,6 +1,13 @@
 /** Database row types — replace with `supabase gen types` output in Phase 2. */
 
-export type Department = 'IT' | 'FAC' | 'HS';
+export type Department = 'IT' | 'FAC' | 'AV' | 'HS';
+export const TICKET_DEPARTMENTS = ['IT', 'FAC', 'HS'] as const satisfies readonly Department[];
+export type TicketDepartment = (typeof TICKET_DEPARTMENTS)[number];
+export const DEPARTMENT_CATEGORY_ROOT: Record<TicketDepartment, string> = {
+  IT: 'IT',
+  FAC: 'Facilities',
+  HS: 'Health and Safety',
+};
 export type TicketStatus =
   | 'awaiting_triage'
   | 'open'
@@ -37,6 +44,8 @@ export interface Ticket {
   subcategory_id: string | null;
   subject: string;
   description: string;
+  requested_for: string | null;
+  time_spent_minutes: number;
   status: TicketStatus;
   priority: TicketPriority;
   submitter_id: string | null;
@@ -76,6 +85,7 @@ export interface Category {
   name: string;
   parent_id: string | null;
   is_active: boolean;
+  default_assignee_id: string | null;
 }
 
 export interface Location {
@@ -90,7 +100,16 @@ export interface Location {
 export const DEPARTMENT_LABEL: Record<Department, string> = {
   IT: 'IT Support',
   FAC: 'Facilities',
+  AV: 'Audio Visual',
   HS: 'Health & Safety',
+};
+
+/** Team-member roles imply their department (mirrors SQL role_department()). */
+export const ROLE_DEPARTMENT: Partial<Record<UserRole, Department>> = {
+  it_tech: 'IT',
+  fac_tech: 'FAC',
+  av_admin: 'AV',
+  hs_officer: 'HS',
 };
 
 export const PRIORITY_LABEL: Record<TicketPriority, string> = {
@@ -115,9 +134,9 @@ export const ROLE_LABEL: Record<UserRole, string> = {
   it_tech: 'IT Technician',
   fac_tech: 'Facilities Technician',
   hs_officer: 'H&S Officer',
-  av_admin: 'Audio Visual Admin',
+  av_admin: 'AV Technician / Admin',
   support: 'Support (close only)',
-  manager: 'Manager',
+  manager: 'Department Manager',
   admin: 'Administrator',
   leadership: 'Leadership (read only)',
 };

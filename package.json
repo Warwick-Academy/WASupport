@@ -4,6 +4,7 @@
   "private": true,
   "packageManager": "pnpm@9.0.0",
   "scripts": {
+    "platform:sync": "node scripts/sync-local-platforms.mjs",
     "dev": "pnpm --filter @academydesk/web dev",
     "build": "pnpm --filter @academydesk/web build",
     "lint": "pnpm -r --parallel lint",

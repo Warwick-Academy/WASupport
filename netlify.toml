@@ -22,6 +22,9 @@
 [functions."av-reminders"]
   schedule = "0 13 * * *"
 
+[functions."ticket-emails"]
+  schedule = "* * * * *"
+
 # Friendly URLs for functions (must come BEFORE the SPA fallback)
 [[redirects]]
   from = "/api/*"

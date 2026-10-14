@@ -1,13 +1,16 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Camera, Mic } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { formatDictation } from '../lib/dictation';
 import { useAuth } from '../lib/auth';
 import SlaBadge from '../components/SlaBadge';
 import {
   DEPARTMENT_LABEL,
   PRIORITY_BADGE,
   PRIORITY_LABEL,
+  ROLE_DEPARTMENT,
   STATUS_BADGE,
   STATUS_LABEL,
   type Ticket,
@@ -24,6 +27,32 @@ type AssigneeOption = {
   department: string | null;
 };
 
+type TicketAttachmentView = { id: string; url: string; message_id: string | null };
+
+interface SpeechRecognitionResultLike {
+  0: { transcript: string };
+}
+
+interface SpeechRecognitionEventLike {
+  results: ArrayLike<SpeechRecognitionResultLike>;
+}
+
+interface SpeechRecognitionLike {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: ((event: { error: string }) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+
+type SpeechRecognitionWindow = Window & {
+  SpeechRecognition?: new () => SpeechRecognitionLike;
+  webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+};
+
 const PRIORITY_SLA_HINT: Record<TicketPriority, string> = {
   urgent: 'Urgent — 4 hours',
   critical: 'Critical — 4 hours',
@@ -34,13 +63,31 @@ const PRIORITY_SLA_HINT: Record<TicketPriority, string> = {
 
 export default function TicketDetail() {
   const { id } = useParams<{ id: string }>();
-  const { user, isStaff, isManager, role } = useAuth();
+  const { user, profile, isTicketStaff, isManager, role } = useAuth();
   const queryClient = useQueryClient();
   const [reply, setReply] = useState('');
+  const [replyPhotos, setReplyPhotos] = useState<File[]>([]);
+  const [timeHours, setTimeHours] = useState('');
+  const [timeMinutes, setTimeMinutes] = useState('0');
+  const [voiceListening, setVoiceListening] = useState(false);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
   const [internal, setInternal] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [triagePriority, setTriagePriority] = useState<TicketPriority>('normal');
   const [triageAssignee, setTriageAssignee] = useState<string>('');
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const dictationRef = useRef('');
+  const replyBeforeDictationRef = useRef('');
+  const totalSelectedMinutes = Number(timeHours || 0) * 60 + Number(timeMinutes);
+  const selectedTimeMinutes = totalSelectedMinutes > 0 ? totalSelectedMinutes : null;
+
+  useEffect(() => () => {
+    const recognition = recognitionRef.current;
+    if (recognition) {
+      recognition.onend = null;
+      recognition.stop();
+    }
+  }, []);
 
   const ticketQ = useQuery({
     queryKey: ['ticket', id],
@@ -51,6 +98,28 @@ export default function TicketDetail() {
       return data as Ticket;
     },
     enabled: !!id,
+  });
+
+  const attachmentsQ = useQuery({
+    queryKey: ['ticket', id, 'attachments'],
+    queryFn: async (): Promise<TicketAttachmentView[]> => {
+      if (!supabase || !id) throw new Error('not ready');
+      const client = supabase;
+      const { data, error } = await client
+        .from('attachments')
+        .select('id, storage_path, message_id')
+        .eq('ticket_id', id)
+        .order('created_at');
+      if (error) throw error;
+      return Promise.all((data ?? []).map(async (attachment) => {
+        const { data: signed, error: signedError } = await client.storage
+          .from('attachments')
+          .createSignedUrl(attachment.storage_path, 3600);
+        if (signedError) throw signedError;
+        return { id: attachment.id, url: signed.signedUrl, message_id: attachment.message_id };
+      }));
+    },
+    enabled: !!id && !!ticketQ.data,
   });
 
   const msgsQ = useQuery({
@@ -69,23 +138,122 @@ export default function TicketDetail() {
   });
 
   const post = useMutation({
-    mutationFn: async () => {
+    mutationFn: async ({ closeTicket, minutes }: { closeTicket: boolean; minutes: number | null }) => {
       if (!supabase || !id || !user) throw new Error('not ready');
-      const { error } = await supabase.from('ticket_messages').insert({
+      if (replyPhotos.length > 3) throw new Error('Attach no more than 3 photos to a reply.');
+      if (replyPhotos.some((photo) => photo.size > 10 * 1024 * 1024)) {
+        throw new Error('Each photo must be 10 MB or smaller.');
+      }
+      if (replyPhotos.some((photo) => !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(photo.type))) {
+        throw new Error('Use PNG, JPEG, WebP, or GIF images.');
+      }
+      const { data: message, error } = await supabase.from('ticket_messages').insert({
         ticket_id: id,
         author_id: user.id,
-        body: reply,
-        is_internal: internal && isStaff,
-      });
+        body: reply.trim() || 'Photo attachment',
+        is_internal: internal && isTicketStaff,
+      }).select('id').single();
       if (error) throw error;
+      const attachmentErrors: string[] = [];
+      for (const photo of replyPhotos) {
+        const extension = photo.type.split('/')[1]?.replace('jpeg', 'jpg') || 'jpg';
+        const storagePath = `tickets/${id}/${crypto.randomUUID()}.${extension}`;
+        const { error: uploadError } = await supabase.storage
+          .from('attachments')
+          .upload(storagePath, photo, { contentType: photo.type, upsert: false });
+        if (uploadError) {
+          attachmentErrors.push(`${photo.name}: ${uploadError.message}`);
+          continue;
+        }
+        const { error: metadataError } = await supabase.from('attachments').insert({
+          ticket_id: id,
+          message_id: message.id,
+          storage_path: storagePath,
+          mime_type: photo.type,
+          size_bytes: photo.size,
+          uploaded_by: user.id,
+        });
+        if (metadataError) {
+          await supabase.storage.from('attachments').remove([storagePath]);
+          attachmentErrors.push(`${photo.name}: ${metadataError.message}`);
+        }
+      }
+      let timeError: string | null = null;
+      if (minutes !== null) {
+        const { error: timeUpdateError } = await supabase.rpc('add_ticket_time', {
+          p_ticket_id: id,
+          p_minutes: minutes,
+          p_close: closeTicket,
+        });
+        if (timeUpdateError) {
+          timeError = closeTicket
+            ? `Reply posted, but time could not be recorded and the ticket was not closed: ${timeUpdateError.message}`
+            : `Reply posted, but time could not be recorded: ${timeUpdateError.message}`;
+        }
+      }
+      return { attachmentErrors, timeError };
     },
-    onSuccess: () => {
+    onSuccess: ({ attachmentErrors, timeError }) => {
       setReply('');
+      setReplyPhotos([]);
       setInternal(false);
+      setTimeHours('');
+      setTimeMinutes('0');
+      const messages = [
+        timeError,
+        ...(attachmentErrors.length > 0
+          ? [`Reply posted, but some photos could not be attached: ${attachmentErrors.join('; ')}`]
+          : []),
+      ].filter(Boolean);
+      setError(messages.length ? messages.join(' ') : null);
       queryClient.invalidateQueries({ queryKey: ['ticket', id, 'messages'] });
+      queryClient.invalidateQueries({ queryKey: ['ticket', id, 'attachments'] });
+      queryClient.invalidateQueries({ queryKey: ['ticket', id] });
     },
     onError: (e: Error) => setError(e.message),
   });
+
+  function toggleReplyDictation() {
+    if (voiceListening) {
+      recognitionRef.current?.stop();
+      return;
+    }
+    const SpeechRecognition = (window as SpeechRecognitionWindow).SpeechRecognition ??
+      (window as SpeechRecognitionWindow).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setVoiceError('Voice entry is not supported in this browser. Try the latest Chrome or Edge.');
+      return;
+    }
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = navigator.language || 'en-US';
+    dictationRef.current = '';
+    replyBeforeDictationRef.current = reply.trim();
+    setVoiceError(null);
+    recognition.onresult = (event) => {
+      dictationRef.current = Array.from(event.results, (result) => result[0].transcript).join(' ');
+      setReply([replyBeforeDictationRef.current, formatDictation(dictationRef.current)].filter(Boolean).join(' '));
+    };
+    recognition.onerror = (event) => {
+      setVoiceError(event.error === 'not-allowed'
+        ? 'Allow microphone access in your browser to dictate a reply.'
+        : `Voice entry stopped: ${event.error}.`);
+    };
+    recognition.onend = () => {
+      recognitionRef.current = null;
+      setVoiceListening(false);
+    };
+    recognitionRef.current = recognition;
+    setVoiceListening(true);
+    try {
+      recognition.start();
+    } catch (startError) {
+      recognitionRef.current = null;
+      setVoiceListening(false);
+      setVoiceError(startError instanceof Error ? startError.message : 'Could not start voice entry.');
+    }
+  }
 
   const updateStatus = useMutation({
     mutationFn: async (newStatus: TicketStatus) => {
@@ -104,12 +272,13 @@ export default function TicketDetail() {
   const t0 = ticketQ.data;
   const assigneesQ = useQuery({
     queryKey: ['assignees', t0?.department],
-    enabled: !!supabase && !!t0 && isStaff,
+    enabled: !!supabase && !!t0 && isTicketStaff,
     queryFn: async (): Promise<AssigneeOption[]> => {
       if (!supabase || !t0) return [];
       const deptRoleMap: Record<string, string> = {
         IT: 'it_tech',
         FAC: 'fac_tech',
+        AV: 'av_admin',
         HS: 'hs_officer',
       };
       const techRole = deptRoleMap[t0.department];
@@ -177,13 +346,16 @@ export default function TicketDetail() {
     return <p className="alert-error">{(ticketQ.error as Error).message}</p>;
 
   const t = ticketQ.data!;
+  const canLogTime = role === 'admin' ||
+    (role === 'manager' && profile?.department === t.department) ||
+    (!!role && ROLE_DEPARTMENT[role] === t.department);
   const assigneeName =
     assigneeProfileQ.data?.full_name || assigneeProfileQ.data?.email || null;
 
   const allStatuses: TicketStatus[] = ['open', 'in_progress', 'on_hold', 'resolved', 'closed'];
   const supportStatuses: TicketStatus[] = ['resolved', 'closed'];
   const availableStatuses =
-    role === 'support' ? supportStatuses : isStaff ? allStatuses : [];
+    role === 'support' ? supportStatuses : isTicketStaff ? allStatuses : [];
 
   return (
     <section className="space-y-6">
@@ -214,12 +386,43 @@ export default function TicketDetail() {
         <p className="mt-4 whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
           {t.description}
         </p>
+        {attachmentsQ.data?.some((attachment) => !attachment.message_id) && (
+          <div className="mt-5">
+            <h2 className="section-title mb-2">Photos</h2>
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+              {attachmentsQ.data.filter((attachment) => !attachment.message_id).map((attachment) => (
+                <a key={attachment.id} href={attachment.url} target="_blank" rel="noreferrer">
+                  <img
+                    src={attachment.url}
+                    alt="Ticket attachment"
+                    className="max-h-64 w-full rounded-md border border-slate-200 object-contain"
+                  />
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+        {attachmentsQ.error && <p className="mt-3 text-xs text-rose-700">Photos could not be loaded.</p>}
 
         <dl className="mt-6 grid grid-cols-2 gap-x-6 gap-y-3 border-t border-slate-100 pt-5 text-xs md:grid-cols-4">
+          {t.requested_for && (
+            <div>
+              <dt className="section-title">Requested for</dt>
+              <dd className="mt-1 text-slate-700">{t.requested_for}</dd>
+            </div>
+          )}
           <div>
             <dt className="section-title">Opened</dt>
             <dd className="mt-1 text-slate-700">{new Date(t.created_at).toLocaleString()}</dd>
           </div>
+          {t.time_spent_minutes > 0 && (
+            <div>
+              <dt className="section-title">Total time spent</dt>
+              <dd className="mt-1 text-slate-700">
+                {Math.floor(t.time_spent_minutes / 60)}h {t.time_spent_minutes % 60}m
+              </dd>
+            </div>
+          )}
           {t.legacy_submitter_name && (
             <div>
               <dt className="section-title">Submitted by</dt>
@@ -274,7 +477,7 @@ export default function TicketDetail() {
           )}
         </dl>
 
-        {isStaff && t.status === 'awaiting_triage' && (
+        {isTicketStaff && t.status === 'awaiting_triage' && (
           <div className="mt-6 rounded-lg border border-rose-200 bg-rose-50 p-4">
             <div className="mb-3 flex items-center gap-2">
               <span className="badge-triage">Needs review</span>
@@ -329,7 +532,7 @@ export default function TicketDetail() {
           </div>
         )}
 
-        {isStaff && t.status !== 'awaiting_triage' && (
+        {isTicketStaff && t.status !== 'awaiting_triage' && (
           <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-5">
             <span className="section-title mr-2">Assignee</span>
             <select
@@ -391,6 +594,21 @@ export default function TicketDetail() {
               <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
                 {m.body}
               </p>
+              {attachmentsQ.data?.some((attachment) => attachment.message_id === m.id) && (
+                <div className="mt-3 flex flex-wrap gap-3">
+                  {attachmentsQ.data
+                    .filter((attachment) => attachment.message_id === m.id)
+                    .map((attachment) => (
+                      <a key={attachment.id} href={attachment.url} target="_blank" rel="noreferrer">
+                        <img
+                          src={attachment.url}
+                          alt="Reply attachment"
+                          className="max-h-56 rounded-md border border-slate-200 object-contain"
+                        />
+                      </a>
+                    ))}
+                </div>
+              )}
             </li>
           ))}
           {msgsQ.data && msgsQ.data.length === 0 && (
@@ -399,12 +617,17 @@ export default function TicketDetail() {
         </ul>
       </div>
 
-      {(isStaff || t.submitter_id === user?.id) && (
+      {(isTicketStaff || t.submitter_id === user?.id) && (
         <form
           onSubmit={(e) => {
             e.preventDefault();
             setError(null);
-            if (reply.trim()) post.mutate();
+            if (reply.trim() || replyPhotos.length > 0) {
+              post.mutate({
+                closeTicket: false,
+                minutes: canLogTime ? selectedTimeMinutes : null,
+              });
+            }
           }}
           className="card-pad space-y-4"
         >
@@ -420,8 +643,89 @@ export default function TicketDetail() {
               className="field resize-y"
               placeholder="Type your reply…"
             />
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={toggleReplyDictation}
+                aria-pressed={voiceListening}
+                className={`${voiceListening ? 'btn-primary' : 'btn-secondary'} inline-flex items-center gap-2`}
+              >
+                <Mic aria-hidden="true" size={16} />
+                {voiceListening ? 'Stop dictation' : 'Dictate reply'}
+              </button>
+              <label className="btn-secondary inline-flex cursor-pointer items-center gap-2">
+                <Camera aria-hidden="true" size={16} />
+                Take or choose photos
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  capture="environment"
+                  multiple
+                  className="sr-only"
+                  onChange={(event) => {
+                    const selected = Array.from(event.target.files ?? []);
+                    setReplyPhotos((current) => [...current, ...selected].slice(0, 3));
+                    event.target.value = '';
+                  }}
+                />
+              </label>
+              <span className="text-xs text-slate-500">Up to 3 images, 10 MB each.</span>
+            </div>
+            {voiceError && <p role="alert" className="mt-2 text-xs text-rose-700">{voiceError}</p>}
+            {replyPhotos.length > 0 && (
+              <ul className="mt-2 space-y-1 text-sm text-slate-600">
+                {replyPhotos.map((photo, index) => (
+                  <li key={`${photo.name}-${photo.lastModified}`} className="flex items-center justify-between gap-3">
+                    <span className="truncate">{photo.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => setReplyPhotos((current) => current.filter((_, i) => i !== index))}
+                      className="text-xs text-rose-700 hover:underline"
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
-          {isStaff && (
+          {canLogTime && (
+            <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+              <label className="block">
+                <span className="field-label">Time spent</span>
+                <select
+                  aria-label="Time spent hours"
+                  value={timeHours}
+                  onChange={(event) => setTimeHours(event.target.value)}
+                  className="field-select"
+                >
+                  <option value="">Hours</option>
+                  <option value="0">0 hours</option>
+                  {Array.from({ length: 8 }, (_, index) => index + 1).map((hours) => (
+                    <option key={hours} value={hours}>{hours} {hours === 1 ? 'hour' : 'hours'}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className="field-label">Additional minutes</span>
+                <select
+                  aria-label="Time spent minutes"
+                  value={timeMinutes}
+                  onChange={(event) => setTimeMinutes(event.target.value)}
+                  className="field-select"
+                >
+                  <option value="0">0 minutes</option>
+                  <option value="15">15 minutes</option>
+                  <option value="30">30 minutes</option>
+                  <option value="45">45 minutes</option>
+                </select>
+              </label>
+              <span className="pb-2 text-xs text-slate-500">
+                Total so far: {Math.floor(t.time_spent_minutes / 60)}h {t.time_spent_minutes % 60}m
+              </span>
+            </div>
+          )}
+          {isTicketStaff && (
             <label className="flex items-center gap-2 text-xs text-slate-600">
               <input
                 type="checkbox"
@@ -439,9 +743,11 @@ export default function TicketDetail() {
                 type="button"
                 onClick={() => {
                   setError(null);
-                  if (reply.trim()) post.mutate();
-                  updateStatus.mutate('closed');
+                  if (reply.trim() || replyPhotos.length > 0) {
+                    post.mutate({ closeTicket: true, minutes: selectedTimeMinutes });
+                  }
                 }}
+                disabled={post.isPending || (!reply.trim() && replyPhotos.length === 0) || !selectedTimeMinutes}
                 className="btn-ghost"
               >
                 Reply &amp; close
@@ -449,7 +755,7 @@ export default function TicketDetail() {
             )}
             <button
               type="submit"
-              disabled={post.isPending || !reply.trim()}
+              disabled={post.isPending || (!reply.trim() && replyPhotos.length === 0) || (canLogTime && !selectedTimeMinutes)}
               className="btn-primary"
             >
               {post.isPending ? 'Sending…' : 'Post reply'}

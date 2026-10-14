@@ -9,10 +9,14 @@ type ImportTotals = {
   inserted: number;
   skipped: number;
   invalid: number;
+  updated: number;
+  assigned: number;
 };
 
+type UnmatchedAssignee = { legacy_ref: string; name: string; department: string };
+
 const BATCH_SIZE = 100;
-const REQUIRED_COLUMNS = ['Ticket Number', 'Summary', 'Description', 'Status', 'Created On'];
+const REQUIRED_COLUMNS = ['Ticket Number', 'Summary', 'Description', 'Status', 'Created On', 'Assigned To'];
 
 function deduplicateHeaders(headers: string[]) {
   const seen: Record<string, number> = {};
@@ -33,11 +37,13 @@ export default function AdminTicketImport() {
   const [isImporting, setIsImporting] = useState(false);
   const [progress, setProgress] = useState({ completed: 0, total: 0 });
   const [totals, setTotals] = useState<ImportTotals | null>(null);
+  const [unmatched, setUnmatched] = useState<UnmatchedAssignee[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   function selectFile(event: ChangeEvent<HTMLInputElement>) {
     setFile(event.target.files?.[0] ?? null);
     setTotals(null);
+    setUnmatched([]);
     setError(null);
     setProgress({ completed: 0, total: 0 });
   }
@@ -48,6 +54,7 @@ export default function AdminTicketImport() {
     setIsImporting(true);
     setError(null);
     setTotals(null);
+    setUnmatched([]);
 
     try {
       const csv = await file.text();
@@ -71,7 +78,7 @@ export default function AdminTicketImport() {
       const token = sessionData.session?.access_token;
       if (!token) throw new Error('Your session has expired. Sign in again before importing.');
 
-      const nextTotals: ImportTotals = { inserted: 0, skipped: 0, invalid: 0 };
+      const nextTotals: ImportTotals = { inserted: 0, skipped: 0, invalid: 0, updated: 0, assigned: 0 };
       setProgress({ completed: 0, total: rows.length });
 
       for (let start = 0; start < rows.length; start += BATCH_SIZE) {
@@ -87,6 +94,7 @@ export default function AdminTicketImport() {
         const result = (await response.json().catch(() => ({}))) as Partial<ImportTotals> & {
           error?: string;
           detail?: string;
+          unmatched?: UnmatchedAssignee[];
         };
         if (!response.ok) {
           throw new Error(result.detail || result.error || `Import failed with HTTP ${response.status}`);
@@ -95,6 +103,9 @@ export default function AdminTicketImport() {
         nextTotals.inserted += result.inserted ?? 0;
         nextTotals.skipped += result.skipped ?? 0;
         nextTotals.invalid += result.invalid ?? 0;
+        nextTotals.updated += result.updated ?? 0;
+        nextTotals.assigned += result.assigned ?? 0;
+        setUnmatched((current) => [...current, ...(result.unmatched ?? [])]);
         setTotals({ ...nextTotals });
         setProgress({ completed: Math.min(start + batch.length, rows.length), total: rows.length });
       }
@@ -119,7 +130,7 @@ export default function AdminTicketImport() {
         <div>
           <h1 className="page-title">Import tickets</h1>
           <p className="text-sm italic text-slate-500">
-            Import a Spiceworks ticket export. Existing ticket numbers are skipped safely.
+            Import a Spiceworks export, including Assigned To. Existing assignments are preserved; missing owners are filled when a unique department-member match is found.
           </p>
         </div>
       </div>
@@ -171,7 +182,7 @@ export default function AdminTicketImport() {
         )}
 
         {totals && (
-          <div className="mt-6 grid grid-cols-3 gap-3" aria-live="polite">
+          <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3" aria-live="polite">
             <div className="rounded-lg bg-emerald-50 p-3">
               <div className="text-2xl font-bold text-emerald-800">{totals.inserted.toLocaleString()}</div>
               <div className="text-xs font-medium text-emerald-700">Inserted</div>
@@ -184,6 +195,33 @@ export default function AdminTicketImport() {
               <div className="text-2xl font-bold text-amber-800">{totals.invalid.toLocaleString()}</div>
               <div className="text-xs font-medium text-amber-700">Invalid rows</div>
             </div>
+            <div className="rounded-lg bg-sky-50 p-3">
+              <div className="text-2xl font-bold text-sky-800">{totals.updated.toLocaleString()}</div>
+              <div className="text-xs font-medium text-sky-700">Existing missing assignees filled</div>
+            </div>
+            <div className="rounded-lg bg-emerald-50 p-3">
+              <div className="text-2xl font-bold text-emerald-800">{totals.assigned.toLocaleString()}</div>
+              <div className="text-xs font-medium text-emerald-700">New tickets assigned</div>
+            </div>
+          </div>
+        )}
+
+        {unmatched.length > 0 && (
+          <div className="mt-6 space-y-3">
+            <p className="alert-warn">{unmatched.length.toLocaleString()} assignee names could not be uniquely matched to an eligible department member. No assignments were guessed.</p>
+            <button type="button" className="btn-ghost" onClick={() => {
+              const rows = [['Ticket Number', 'Assigned To', 'Department'], ...unmatched.map((row) => [row.legacy_ref, row.name, row.department])];
+              const csv = rows.map((row) => row.map((value) => {
+                const safe = /^[=+\-@]/.test(value) ? `'${value}` : value;
+                return `"${safe.replace(/"/g, '""')}"`;
+              }).join(',')).join('\r\n');
+              const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+              const anchor = document.createElement('a');
+              anchor.href = url;
+              anchor.download = 'unmatched-spiceworks-assignees.csv';
+              anchor.click();
+              URL.revokeObjectURL(url);
+            }}>Download unmatched assignees</button>
           </div>
         )}
 
