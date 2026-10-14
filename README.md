@@ -83,6 +83,15 @@ Supabase Auth/provider settings, and SendGrid sender/webhook settings live in
 their respective dashboards. Changes there affect both computers when they use
 the same services; rerun `platform:sync` after credential changes.
 
+School-computer validation: the web build, frontend/serverless type checks, and
+mocked email tests pass. Netlify CLI authentication/site access and the deployed
+health endpoint work. Local web serving also returns HTTP 200, but the local
+function emulator currently fails with `module is not defined in ES module scope`
+when loading its generated CommonJS wrapper beneath the web package. This was
+reproduced with Netlify CLI 27.12.1 and 24.11.3 on Node 24.21.0; local function
+emulation is not yet verified. Supabase CLI migration access and signed SendGrid
+delivery callbacks have not been verified either.
+
 Supabase migrations are source-controlled but must be applied separately by an
 authorized operator. Install the Supabase CLI and link it on each computer with
 `supabase link --project-ref lpfayazlroudwnsgioou` before using cloud migration
