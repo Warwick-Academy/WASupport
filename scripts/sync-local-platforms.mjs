@@ -52,7 +52,11 @@ async function main() {
   const site = await (await request(
     `https://api.netlify.com/api/v1/sites/${siteId}`, { headers },
   )).json();
-  if (site.build_settings?.repo_url !== 'https://github.com/Markinbda/WASupport') {
+  const repositoryUrls = [
+    'https://github.com/Warwick-Academy/WASupport',
+    'https://github.com/Markinbda/WASupport',
+  ];
+  if (!repositoryUrls.includes(site.build_settings?.repo_url)) {
     throw new Error('Netlify site is not connected to the expected WASupport repository.');
   }
   const variables = await (await request(

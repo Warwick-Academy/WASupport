@@ -34,7 +34,11 @@ See [STAGES.md](./STAGES.md) for the full step-by-step build walkthrough.
 
 ## Syncing home and school computers
 
-Both computers use `https://github.com/Markinbda/WASupport.git`. Source changes
+Both computers should use `https://github.com/Warwick-Academy/WASupport.git`.
+GitHub reports that the previous `Markinbda/WASupport` URL has moved there.
+Update an older checkout with
+`git remote set-url origin https://github.com/Warwick-Academy/WASupport.git`.
+Source changes
 sync through Git commits, not folder copying. Before switching computers, commit
 and push your work; on the other computer, commit any local work before pulling.
 Use `git pull --ff-only` to avoid an accidental merge. The school setup branch is
