@@ -26,6 +26,7 @@ import RequireAvAdmin from './components/RequireAvAdmin';
 import AdminTicketImport from './pages/AdminTicketImport';
 import AvRequest from './pages/AvRequest';
 import AvAdmin from './pages/AvAdmin';
+import EventSetup from './pages/EventSetup';
 
 export default function App() {
   return (
@@ -38,6 +39,7 @@ export default function App() {
           <Route path="/tickets" element={<TicketsList />} />
           <Route path="/new" element={<NewTicket />} />
           <Route path="/av-request" element={<AvRequest />} />
+          <Route path="/event-setup" element={<EventSetup />} />
           <Route path="/tickets/:id" element={<TicketDetail />} />
           <Route path="/queue" element={<Queue />} />
           <Route element={<RequireStaff />}>

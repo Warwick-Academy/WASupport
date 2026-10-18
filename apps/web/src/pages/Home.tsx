@@ -50,6 +50,20 @@ const TILES: Tile[] = [
       </svg>
     ),
   },
+  {
+    to: '/event-setup',
+    title: 'Event Setup',
+    description: 'Request seating, tables, and other Facilities event preparation.',
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} className="h-10 w-10">
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M4 5h16v14H4zM8 3v4m8-4v4M4 10h16M8 14h3m2 0h3"
+        />
+      </svg>
+    ),
+  },
 ];
 
 export default function Home() {
