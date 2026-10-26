@@ -31,7 +31,7 @@ type EventSetupRequest = {
   seat_sections: number | null;
   seats_per_section_row: number | null;
   seat_back_row_chairs: number;
-  seat_placement: 'left' | 'right' | 'center';
+  seat_placement: 'left' | 'right' | 'center' | 'outside';
   seat_section_offsets: Record<string, number> | null;
   layout_element_positions: Record<string, LayoutPosition> | null;
   round_table_count: number | null;
@@ -152,12 +152,14 @@ function configurationSummary(request: EventSetupRequest) {
       const placement =
         request.seat_placement === 'center'
           ? 'center of hall'
-          : `${request.seat_placement} side of hall`;
+          : request.seat_placement === 'outside'
+            ? 'outside edges of hall'
+            : `${request.seat_placement} side of hall`;
       details.push(`Placement: ${placement}`);
     }
   }
   if (request.seat_back_row_chairs > 0) {
-    details.push(`Back row away from stage: ${request.seat_back_row_chairs} chairs`);
+    details.push(`Balcony: ${request.seat_back_row_chairs} chairs requested`);
   }
   if (request.equipment.length) details.push(`Equipment: ${request.equipment.join(', ')}`);
   if (request.round_table_count) {
@@ -257,7 +259,7 @@ function HallSeatMap({
   rows: number;
   seatsPerRow: number;
   backRowChairs?: number;
-  placement: 'left' | 'right' | 'center';
+  placement: 'left' | 'right' | 'center' | 'outside';
   offsets?: Record<string, number>;
   onOffsetsChange?: (offsets: Record<string, number>) => void;
   interactive?: boolean;
@@ -340,9 +342,17 @@ function HallSeatMap({
       : {}),
   });
   const leftCount =
-    placement === 'right' ? 0 : placement === 'center' ? Math.ceil(sections / 2) : sections;
+    placement === 'right'
+      ? 0
+      : placement === 'center' || placement === 'outside'
+        ? Math.ceil(sections / 2)
+        : sections;
   const rightCount =
-    placement === 'left' ? 0 : placement === 'center' ? Math.floor(sections / 2) : sections;
+    placement === 'left'
+      ? 0
+      : placement === 'center' || placement === 'outside'
+        ? Math.floor(sections / 2)
+        : sections;
   const sectionBlock = (
     sectionNumber: number,
     align: 'left' | 'right',
@@ -358,10 +368,13 @@ function HallSeatMap({
     />
   );
   const leftSections = Array.from({ length: leftCount }, (_, index) =>
-    sectionBlock(leftCount - index, 'right'),
+    sectionBlock(leftCount - index, placement === 'outside' ? 'left' : 'right'),
   );
   const rightSections = Array.from({ length: rightCount }, (_, index) =>
-    sectionBlock(placement === 'right' ? index + 1 : leftCount + index + 1, 'left'),
+    sectionBlock(
+      placement === 'right' ? index + 1 : leftCount + index + 1,
+      placement === 'outside' ? 'right' : 'left',
+    ),
   );
   const aisle = (
     <div
@@ -374,7 +387,7 @@ function HallSeatMap({
   const backRow = backRowChairs > 0 && (
     <div className="mx-auto mt-3 flex w-fit justify-center">
       <SeatBlock
-        section="Back row · away from stage"
+        section={`Balcony · ${backRowChairs} chairs requested`}
         rows={1}
         seatsPerRow={backRowChairs}
         align="left"
@@ -690,7 +703,7 @@ async function downloadEventRequestPdf(request: EventSetupRequest, occurrenceDat
     );
   }
   if (request.seat_back_row_chairs > 0) {
-    details.push(`Back row away from stage: ${request.seat_back_row_chairs} chairs`);
+    details.push(`Balcony: ${request.seat_back_row_chairs} chairs requested`);
   }
   if (request.round_table_count) {
     details.push(
@@ -861,13 +874,13 @@ async function downloadEventRequestPdf(request: EventSetupRequest, occurrenceDat
       const leftCount =
         request.seat_placement === 'right'
           ? 0
-          : request.seat_placement === 'center'
+          : request.seat_placement === 'center' || request.seat_placement === 'outside'
             ? Math.ceil(sections / 2)
             : sections;
       const rightCount =
         request.seat_placement === 'left'
           ? 0
-          : request.seat_placement === 'center'
+          : request.seat_placement === 'center' || request.seat_placement === 'outside'
             ? Math.floor(sections / 2)
             : sections;
       const aisleLeft = centerX - aisleWidth / 2;
@@ -916,7 +929,7 @@ async function downloadEventRequestPdf(request: EventSetupRequest, occurrenceDat
       const sideRowHeight = Math.min(3.5, (availableBottom - seatsTop - 12) / Math.max(rows, 1));
       const backRowWidth = Math.min(roomWidth * 0.47, request.seat_back_row_chairs * 2 + 12);
       drawSeatBlock(
-        'BACK ROW · AWAY FROM STAGE',
+        `BALCONY · ${request.seat_back_row_chairs} CHAIRS REQUESTED`,
         centerX - backRowWidth / 2,
         Math.min(seatsTop + rows * sideRowHeight + 16, availableBottom - 12),
         1,
@@ -963,7 +976,9 @@ export default function EventSetup() {
   const [seatSections, setSeatSections] = useState('');
   const [seatsPerRow, setSeatsPerRow] = useState('');
   const [seatBackRowChairs, setSeatBackRowChairs] = useState('0');
-  const [seatPlacement, setSeatPlacement] = useState<'left' | 'right' | 'center'>('center');
+  const [seatPlacement, setSeatPlacement] = useState<'left' | 'right' | 'center' | 'outside'>(
+    'center',
+  );
   const [seatSectionOffsets, setSeatSectionOffsets] = useState<Record<string, number>>({});
   const [eventChairsRequired, setEventChairsRequired] = useState(false);
   const [equipment, setEquipment] = useState<EventSetupEquipment[]>([]);
@@ -1144,7 +1159,7 @@ export default function EventSetup() {
     setSeatRows('16');
     setSeatsPerRow('1');
     setSeatBackRowChairs('25');
-    setSeatPlacement('center');
+    setSeatPlacement('outside');
     setSeatSectionOffsets({});
     setLayoutElementPositions({});
     setTableCount('0');
@@ -1653,7 +1668,7 @@ export default function EventSetup() {
                 />
               </label>
               <label className="field-label">
-                Back row chairs (away from stage)
+                Balcony chairs (away from stage)
                 <input
                   type="number"
                   min="0"
@@ -1691,7 +1706,7 @@ export default function EventSetup() {
                   id="seat-placement"
                   value={seatPlacement}
                   onChange={(event) => {
-                    setSeatPlacement(event.target.value as 'left' | 'right' | 'center');
+                    setSeatPlacement(event.target.value as 'left' | 'right' | 'center' | 'outside');
                     setSeatSectionOffsets({});
                   }}
                   className="field-select"
@@ -1699,6 +1714,7 @@ export default function EventSetup() {
                   <option value="left">Left side of hall</option>
                   <option value="right">Right side of hall</option>
                   <option value="center">Center of hall</option>
+                  <option value="outside">Outside edges of hall</option>
                 </select>
               </div>
             )}
@@ -1806,7 +1822,7 @@ export default function EventSetup() {
                         />
                       </label>
                       <label className="field-label">
-                        Back row chairs (away from stage)
+                        Balcony chairs (away from stage)
                         <input
                           type="number"
                           min="0"
@@ -1841,7 +1857,9 @@ export default function EventSetup() {
                         <select
                           value={seatPlacement}
                           onChange={(event) => {
-                            setSeatPlacement(event.target.value as 'left' | 'right' | 'center');
+                            setSeatPlacement(
+                              event.target.value as 'left' | 'right' | 'center' | 'outside',
+                            );
                             setSeatSectionOffsets({});
                           }}
                           className="field-select mt-1"
@@ -1849,6 +1867,7 @@ export default function EventSetup() {
                           <option value="left">Left side of hall</option>
                           <option value="right">Right side of hall</option>
                           <option value="center">Center of hall</option>
+                          <option value="outside">Outside edges of hall</option>
                         </select>
                       </label>
                     )}
@@ -1977,7 +1996,7 @@ export default function EventSetup() {
                       {seatingLayout.total} chairs · {seatingLayout.sections} sections ×{' '}
                       {seatingLayout.rows} rows × {seatingLayout.perRow} chairs per row
                       {numeric(seatBackRowChairs) > 0 &&
-                        ` + ${numeric(seatBackRowChairs)} in the back row`}
+                        ` + ${numeric(seatBackRowChairs)} balcony chairs`}
                     </p>
                     <HallSeatMap
                       sections={seatingLayout.sections}
