@@ -33,6 +33,7 @@ export interface Profile {
   full_name: string | null;
   role: UserRole;
   department: Department | null;
+  show_event_setup: boolean;
   created_at: string;
 }
 

@@ -75,7 +75,7 @@ export default function AdminUsers() {
       if (!supabase) throw new Error('Supabase not configured');
       let q = supabase
         .from('profiles')
-        .select('id, email, full_name, role, department, created_at')
+        .select('id, email, full_name, role, department, show_event_setup, created_at')
         .order('created_at', { ascending: false })
         .limit(200);
       if (search.trim()) {
@@ -94,7 +94,7 @@ export default function AdminUsers() {
       patch,
     }: {
       id: string;
-      patch: { role?: UserRole; department?: Department | null };
+      patch: { role?: UserRole; department?: Department | null; show_event_setup?: boolean };
     }) => {
       if (!supabase) throw new Error('Supabase not configured');
       const { error } = await supabase.from('profiles').update(patch).eq('id', id);
@@ -379,6 +379,7 @@ export default function AdminUsers() {
                   <th>Email</th>
                   <th>Role</th>
                   {view === 'staff' && <th>Department</th>}
+                  <th>Event tile</th>
                   <th>Emulation</th>
                   <th>Joined</th>
                 </tr>
@@ -424,6 +425,21 @@ export default function AdminUsers() {
                         />
                       </td>
                     )}
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={u.show_event_setup}
+                        disabled={updateProfile.isPending}
+                        aria-label={`Show Event Setup tile for ${u.full_name ?? u.email}`}
+                        onChange={(event) =>
+                          updateProfile.mutate({
+                            id: u.id,
+                            patch: { show_event_setup: event.target.checked },
+                          })
+                        }
+                        className="h-4 w-4 rounded border-slate-300 text-brand-navy focus:ring-brand-navy"
+                      />
+                    </td>
                     <td>
                       {[
                         'submitter',

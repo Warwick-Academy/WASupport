@@ -88,9 +88,31 @@ const TILES: Tile[] = [
   },
 ];
 
+const EVENT_SETUP_TILE: Tile = {
+  to: '/event-setup',
+  title: 'Event Setup',
+  description: 'Request room setup for an event, exam, or assembly.',
+  icon: (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.6}
+      className="h-10 w-10"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M7 3v3m10-3v3M4 9h16M5 5h14a1 1 0 011 1v13H4V6a1 1 0 011-1zm3 8h3m-3 3h6"
+      />
+    </svg>
+  ),
+};
+
 export default function Home() {
   const { profile, user, isTicketStaff, profileLoading } = useAuth();
   const greeting = profile?.full_name?.split(' ')[0] ?? '';
+  const tiles = profile?.show_event_setup ? [...TILES, EVENT_SETUP_TILE] : TILES;
 
   if (user && profileLoading) {
     return <div className="p-6 text-sm text-slate-500">Loading your dashboard…</div>;
@@ -105,7 +127,7 @@ export default function Home() {
       </header>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {TILES.map((t) => (
+        {tiles.map((t) => (
           <Link
             key={t.to}
             to={t.to}

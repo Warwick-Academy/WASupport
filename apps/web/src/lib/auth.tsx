@@ -113,7 +113,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const { data, error } = await supabase
           .from('profiles')
-          .select('id, email, full_name, role, department, created_at')
+          .select('id, email, full_name, role, department, show_event_setup, created_at')
           .eq('id', session.user.id)
           .maybeSingle();
         if (error) console.error('[AuthProvider] profile fetch failed', error);
@@ -133,7 +133,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!supabase || !session?.user) return;
     const { data } = await supabase
       .from('profiles')
-      .select('id, email, full_name, role, department, created_at')
+      .select('id, email, full_name, role, department, show_event_setup, created_at')
       .eq('id', session.user.id)
       .maybeSingle();
     setProfile((data as Profile) ?? null);

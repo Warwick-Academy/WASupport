@@ -62,7 +62,7 @@ export default function UserProfile() {
       if (!supabase) throw new Error('Supabase not configured');
       const { data, error } = await supabase
         .from('profiles')
-        .select('id, email, full_name, role, department, created_at')
+        .select('id, email, full_name, role, department, show_event_setup, created_at')
         .eq('id', id)
         .maybeSingle();
       if (error) throw error;
