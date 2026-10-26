@@ -109,9 +109,19 @@ const EVENT_SETUP_TILE: Tile = {
   ),
 };
 
+function formatGreetingName(fullName: string | null | undefined): string {
+  const name = fullName?.trim() ?? '';
+  const commaIndex = name.indexOf(',');
+  if (commaIndex < 0) return name;
+
+  const lastName = name.slice(0, commaIndex).trim();
+  const firstName = name.slice(commaIndex + 1).trim();
+  return lastName && firstName ? `${firstName} ${lastName}` : name;
+}
+
 export default function Home() {
   const { profile, user, isTicketStaff, profileLoading } = useAuth();
-  const greeting = profile?.full_name?.split(' ')[0] ?? '';
+  const greeting = formatGreetingName(profile?.full_name);
   const tiles = profile?.show_event_setup ? [...TILES, EVENT_SETUP_TILE] : TILES;
 
   if (user && profileLoading) {
