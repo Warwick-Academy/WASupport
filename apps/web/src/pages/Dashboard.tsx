@@ -153,7 +153,7 @@ function KpiTile({
           return (
             <div key={department} className="flex items-baseline justify-between gap-1">
               <span className="truncate text-[11px] text-slate-600">{DEPARTMENT_LABEL[department]}</span>
-              <span className="text-sm font-semibold text-slate-900">
+              <span className="text-2xl font-bold leading-none text-slate-900">
                 {value}
                 {previous !== undefined && <DeltaArrow current={value} previous={previous} />}
               </span>
@@ -495,7 +495,7 @@ export default function Dashboard() {
           to={drilldownUrl('unassigned')}
         />
         <KpiTile
-          label="Resolved"
+          label="Closed"
           rows={kpisQ.data ?? []}
           departments={chartDepartments}
           metric="resolved_tickets"

@@ -106,6 +106,11 @@ export default function AppShell() {
                 AV Admin
               </NavLink>
             )}
+            {(role === 'fac_tech' || isManager) && (
+              <NavLink to="/event-setup" className={linkClass}>
+                Event Setup
+              </NavLink>
+            )}
             {isAdmin && (
               <NavLink to="/admin/users" className={linkClass}>
                 Users

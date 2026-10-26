@@ -4,18 +4,49 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/auth';
 
-const EQUIPMENT = ['Interactive Board', 'Projector', 'Microphone', 'Laptop', 'Handheld Mic', 'Laptop Sound', 'Camera', 'Lighting', 'Other'];
-const LOCATIONS = ['PPMH', 'Lower Primary Quad', 'Upper Primary Quad', 'PPMH Quad', 'Old Quad', 'Field', 'Other'];
+const EQUIPMENT = [
+  'Interactive Board',
+  'Projector',
+  'Microphone',
+  'Laptop',
+  'Handheld Mic',
+  'Laptop Sound',
+  'Camera',
+  'Lighting',
+  'Other',
+];
+const LOCATIONS = [
+  'PPMH',
+  'Lower Primary Quad',
+  'Upper Primary Quad',
+  'PPMH Quad',
+  'Old Quad',
+  'Field',
+  'Other',
+];
 const MUSIC = ['Soft Music', 'Upbeat Music', 'N/A'];
 const MAX_FILE_BYTES = 30 * 1024 * 1024;
 const FILE_TYPES = [
-  'application/pdf', 'application/msword',
+  'application/pdf',
+  'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  'image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif',
-  'video/mp4', 'video/webm', 'video/quicktime',
-  'audio/mpeg', 'audio/mp4', 'audio/wav', 'audio/x-wav', 'audio/ogg',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'image/png',
+  'image/jpeg',
+  'image/jpg',
+  'image/webp',
+  'image/gif',
+  'video/mp4',
+  'video/webm',
+  'video/quicktime',
+  'audio/mpeg',
+  'audio/mp4',
+  'audio/wav',
+  'audio/x-wav',
+  'audio/ogg',
 ];
 
 type AvRequestRecord = {
@@ -74,8 +105,12 @@ export default function AvRequest() {
       if (!supabase || !user) return [];
       const { data, error } = await supabase
         .from('av_requests')
-        .select('id,requester_id,requester_name,requester_email,requested_date,setup_time,equipment,music_request,location,details,links,created_at')
-        .or(`requester_id.eq.${user.id},id.eq.${editingId ?? '00000000-0000-0000-0000-000000000000'}`)
+        .select(
+          'id,requester_id,requester_name,requester_email,requested_date,setup_time,equipment,music_request,location,details,links,created_at',
+        )
+        .or(
+          `requester_id.eq.${user.id},id.eq.${editingId ?? '00000000-0000-0000-0000-000000000000'}`,
+        )
         .order('requested_date', { ascending: true });
       if (error) throw error;
       return data as AvRequestRecord[];
@@ -83,14 +118,17 @@ export default function AvRequest() {
   });
 
   const editingRequest = requests.data?.find((request) => request.id === editingId) ?? null;
-  const canEditRequest = !!editingRequest && (isAdmin || isAvAdmin || editingRequest.requested_date >= localDate());
+  const canEditRequest =
+    !!editingRequest && (isAdmin || isAvAdmin || editingRequest.requested_date >= localDate());
 
   useEffect(() => {
     if (!editingRequest) return;
     setRequestedDate(editingRequest.requested_date);
     setSetupTime(editingRequest.setup_time.slice(0, 5));
     const savedOther = editingRequest.equipment.find((item) => item.startsWith('Other:'));
-    setEquipment(editingRequest.equipment.map((item) => item.startsWith('Other:') ? 'Other' : item));
+    setEquipment(
+      editingRequest.equipment.map((item) => (item.startsWith('Other:') ? 'Other' : item)),
+    );
     setOtherEquipment(savedOther ? savedOther.slice('Other:'.length).trim() : '');
     setMusic(editingRequest.music_request);
     setLocation(editingRequest.location);
@@ -98,7 +136,8 @@ export default function AvRequest() {
     setLinks([...editingRequest.links, '', '', '', ''].slice(0, 4));
   }, [editingRequest]);
 
-  const requesterName = profile?.full_name?.trim() || user?.user_metadata?.full_name || user?.email || '';
+  const requesterName =
+    profile?.full_name?.trim() || user?.user_metadata?.full_name || user?.email || '';
   const requesterEmail = profile?.email || user?.email || '';
 
   function addFiles(incoming: FileList | File[]) {
@@ -125,7 +164,9 @@ export default function AvRequest() {
     const token = data.session?.access_token;
     const providerToken = data.session?.provider_token;
     if (!token || !providerToken) {
-      throw new Error('Calendar authorization is missing. Sign out and sign in with Microsoft again.');
+      throw new Error(
+        'Calendar authorization is missing. Sign out and sign in with Microsoft again.',
+      );
     }
     const response = await fetch('/api/av-calendar', {
       method: 'POST',
@@ -158,7 +199,9 @@ export default function AvRequest() {
     let requestId: string | null = null;
     const uploadedPaths: string[] = [];
     try {
-      const submittedEquipment = equipment.map((item) => item === 'Other' && otherEquipment.trim() ? `Other: ${otherEquipment.trim()}` : item);
+      const submittedEquipment = equipment.map((item) =>
+        item === 'Other' && otherEquipment.trim() ? `Other: ${otherEquipment.trim()}` : item,
+      );
       const values = {
         requester_name: editingRequest?.requester_name ?? requesterName,
         requester_email: editingRequest?.requester_email ?? requesterEmail,
@@ -172,14 +215,21 @@ export default function AvRequest() {
       };
       if (editingId) {
         if (!canEditRequest) throw new Error('This AV request can no longer be edited.');
-        const { error: updateError } = await supabase.from('av_requests').update(values).eq('id', editingId);
+        const { error: updateError } = await supabase
+          .from('av_requests')
+          .update(values)
+          .eq('id', editingId);
         if (updateError) throw updateError;
         setSuccess('Your AV request was updated.');
         await queryClient.invalidateQueries({ queryKey: ['my-av-requests', user.id] });
         setSearchParams({});
         return;
       }
-      const { data: request, error: insertError } = await supabase.from('av_requests').insert({ requester_id: user.id, ...values }).select('id').single();
+      const { data: request, error: insertError } = await supabase
+        .from('av_requests')
+        .insert({ requester_id: user.id, ...values })
+        .select('id')
+        .single();
       if (insertError) throw insertError;
       requestId = request.id as string;
 
@@ -210,7 +260,9 @@ export default function AvRequest() {
         setSuccess('Your AV request was submitted and added to your Microsoft calendar.');
       } catch (calendarError) {
         setSuccess('Your AV request was submitted.');
-        setError(calendarError instanceof Error ? calendarError.message : 'Calendar creation failed.');
+        setError(
+          calendarError instanceof Error ? calendarError.message : 'Calendar creation failed.',
+        );
       }
       setRequestedDate('');
       setSetupTime('');
@@ -222,7 +274,8 @@ export default function AvRequest() {
       setLinks(['', '', '', '']);
       setFiles([]);
     } catch (caught) {
-      if (uploadedPaths.length) await supabase.storage.from('av-request-files').remove(uploadedPaths);
+      if (uploadedPaths.length)
+        await supabase.storage.from('av-request-files').remove(uploadedPaths);
       if (requestId) await supabase.from('av_requests').delete().eq('id', requestId);
       setError(caught instanceof Error ? caught.message : 'Could not submit the AV request.');
     } finally {
@@ -232,27 +285,50 @@ export default function AvRequest() {
 
   return (
     <section className="mx-auto max-w-4xl">
-      <h1 className="page-title">{editingId ? 'Edit Audio/Visual Request' : 'Audio/Visual Request'}</h1>
+      <h1 className="page-title">
+        {editingId ? 'Edit Audio/Visual Request' : 'Audio/Visual Request'}
+      </h1>
       <p className="page-subtitle">Request audio/visual support for an event or class.</p>
 
       {success && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" role="dialog" aria-modal="true" aria-labelledby="av-success-title">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="av-success-title"
+        >
           <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
-            <h2 id="av-success-title" className="text-lg font-semibold text-brand-navy">Submitted successfully</h2>
+            <h2 id="av-success-title" className="text-lg font-semibold text-brand-navy">
+              Submitted successfully
+            </h2>
             <p className="mt-2 text-sm text-slate-600">{success}</p>
             <div className="mt-6 flex justify-end">
-              <button type="button" onClick={() => setSuccess(null)} className="btn-primary">Close</button>
+              <button type="button" onClick={() => setSuccess(null)} className="btn-primary">
+                Close
+              </button>
             </div>
           </div>
         </div>
       )}
       {error && <p className="mb-4 alert-error">{error}</p>}
 
-      {editingId && !requests.isLoading && !editingRequest && <p className="alert-error">This AV request could not be found or you do not have access to it.</p>}
-      {editingId && editingRequest && !canEditRequest && <p className="mb-4 alert-error">This request is in the past and can no longer be edited.</p>}
+      {editingId && !requests.isLoading && !editingRequest && (
+        <p className="alert-error">
+          This AV request could not be found or you do not have access to it.
+        </p>
+      )}
+      {editingId && editingRequest && !canEditRequest && (
+        <p className="mb-4 alert-error">This request is in the past and can no longer be edited.</p>
+      )}
 
-      <form onSubmit={(event) => { event.preventDefault(); void submitRequest(); }} className="card-pad space-y-6">
-        <div className="grid gap-6 md:grid-cols-2">
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          void submitRequest();
+        }}
+        className="card-pad space-y-4 !p-5 sm:!p-6"
+      >
+        <div className="grid gap-x-4 gap-y-3 md:grid-cols-2">
           <div>
             <label className="field-label">Requester name</label>
             <div className="field bg-slate-50 text-slate-600">{requesterName}</div>
@@ -262,12 +338,31 @@ export default function AvRequest() {
             <div className="field bg-slate-50 text-slate-600">{requesterEmail}</div>
           </div>
           <div>
-            <label htmlFor="av-date" className="field-label">Date requested for:</label>
-            <input id="av-date" type="date" required min={localDate()} value={requestedDate} onChange={(e) => setRequestedDate(e.target.value)} className="field" />
+            <label htmlFor="av-date" className="field-label">
+              Date requested for:
+            </label>
+            <input
+              id="av-date"
+              type="date"
+              required
+              min={localDate()}
+              value={requestedDate}
+              onChange={(e) => setRequestedDate(e.target.value)}
+              className="field"
+            />
           </div>
           <div>
-            <label htmlFor="av-time" className="field-label">Set up by</label>
-            <input id="av-time" type="time" required value={setupTime} onChange={(e) => setSetupTime(e.target.value)} className="field" />
+            <label htmlFor="av-time" className="field-label">
+              Set up by
+            </label>
+            <input
+              id="av-time"
+              type="time"
+              required
+              value={setupTime}
+              onChange={(e) => setSetupTime(e.target.value)}
+              className="field"
+            />
           </div>
         </div>
 
@@ -275,8 +370,22 @@ export default function AvRequest() {
           <legend className="field-label">Equipment</legend>
           <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3">
             {EQUIPMENT.map((item) => (
-              <label key={item} className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm">
-                <input type="checkbox" disabled={!!editingId && !canEditRequest} checked={equipment.includes(item)} onChange={() => setEquipment((current) => current.includes(item) ? current.filter((value) => value !== item) : [...current, item])} />
+              <label
+                key={item}
+                className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
+              >
+                <input
+                  type="checkbox"
+                  disabled={!!editingId && !canEditRequest}
+                  checked={equipment.includes(item)}
+                  onChange={() =>
+                    setEquipment((current) =>
+                      current.includes(item)
+                        ? current.filter((value) => value !== item)
+                        : [...current, item],
+                    )
+                  }
+                />
                 {item}
               </label>
             ))}
@@ -294,32 +403,72 @@ export default function AvRequest() {
           )}
         </fieldset>
 
-        <div className="grid gap-6 md:grid-cols-2">
+        <div className="grid gap-x-4 gap-y-3 md:grid-cols-2">
           <div>
-            <label htmlFor="av-music" className="field-label">Music request</label>
-            <select id="av-music" value={music} onChange={(e) => setMusic(e.target.value)} className="field-select">
-              {MUSIC.map((item) => <option key={item}>{item}</option>)}
+            <label htmlFor="av-music" className="field-label">
+              Music request
+            </label>
+            <select
+              id="av-music"
+              value={music}
+              onChange={(e) => setMusic(e.target.value)}
+              className="field-select"
+            >
+              {MUSIC.map((item) => (
+                <option key={item}>{item}</option>
+              ))}
             </select>
           </div>
           <div>
-            <label htmlFor="av-location" className="field-label">Location</label>
-            <select id="av-location" required value={location} onChange={(e) => setLocation(e.target.value)} className="field-select">
+            <label htmlFor="av-location" className="field-label">
+              Location
+            </label>
+            <select
+              id="av-location"
+              required
+              value={location}
+              onChange={(e) => setLocation(e.target.value)}
+              className="field-select"
+            >
               <option value="">Select a location</option>
-              {LOCATIONS.map((item) => <option key={item}>{item}</option>)}
+              {LOCATIONS.map((item) => (
+                <option key={item}>{item}</option>
+              ))}
             </select>
           </div>
         </div>
 
         <div>
-          <label htmlFor="av-details" className="field-label">Details of request</label>
-          <textarea id="av-details" rows={5} value={details} onChange={(e) => setDetails(e.target.value)} className="field" />
+          <label htmlFor="av-details" className="field-label">
+            Details of request
+          </label>
+          <textarea
+            id="av-details"
+            rows={4}
+            value={details}
+            onChange={(e) => setDetails(e.target.value)}
+            className="field"
+          />
         </div>
 
         <fieldset>
           <legend className="field-label">Presentation links</legend>
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid gap-2 md:grid-cols-2">
             {links.map((link, index) => (
-              <input key={index} type="url" value={link} onChange={(e) => setLinks((current) => current.map((value, itemIndex) => itemIndex === index ? e.target.value : value))} className="field" placeholder={`Link ${index + 1} (optional)`} />
+              <input
+                key={index}
+                type="url"
+                value={link}
+                onChange={(e) =>
+                  setLinks((current) =>
+                    current.map((value, itemIndex) =>
+                      itemIndex === index ? e.target.value : value,
+                    ),
+                  )
+                }
+                className="field"
+                placeholder={`Link ${index + 1} (optional)`}
+              />
             ))}
           </div>
         </fieldset>
@@ -327,46 +476,113 @@ export default function AvRequest() {
         <div>
           <span className="field-label">Files</span>
           <div
-            onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
+            onDragOver={(event) => {
+              event.preventDefault();
+              setDragging(true);
+            }}
             onDragLeave={() => setDragging(false)}
             onDrop={dropFiles}
-            className={`rounded-lg border-2 border-dashed p-8 text-center transition ${dragging ? 'border-brand-navy bg-blue-50' : 'border-slate-300 bg-slate-50'}`}
+            className={`rounded-lg border-2 border-dashed p-4 text-center transition ${dragging ? 'border-brand-navy bg-blue-50' : 'border-slate-300 bg-slate-50'}`}
           >
             <label className="cursor-pointer text-sm font-semibold text-brand-navy">
               Choose files
-              <input type="file" multiple accept={FILE_TYPES.join(',')} className="sr-only" onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.currentTarget.value = ''; }} />
+              <input
+                type="file"
+                multiple
+                accept={FILE_TYPES.join(',')}
+                className="sr-only"
+                onChange={(e) => {
+                  if (e.target.files) addFiles(e.target.files);
+                  e.currentTarget.value = '';
+                }}
+              />
             </label>
-            <p className="mt-1 text-xs text-slate-500">or drag and drop files here · 25 MB maximum per file</p>
+            <p className="mt-1 text-xs text-slate-500">
+              or drag and drop files here · 25 MB maximum per file
+            </p>
           </div>
           {files.length > 0 && (
             <ul className="mt-3 space-y-2">
               {files.map((file, index) => (
-                <li key={`${file.name}-${index}`} className="flex items-center justify-between rounded-md bg-slate-100 px-3 py-2 text-sm">
-                  <span className="truncate">{file.name} · {(file.size / 1024 / 1024).toFixed(1)} MB</span>
-                  <button type="button" onClick={() => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="ml-3 text-xs font-medium text-rose-600">Remove</button>
+                <li
+                  key={`${file.name}-${index}`}
+                  className="flex items-center justify-between rounded-md bg-slate-100 px-3 py-2 text-sm"
+                >
+                  <span className="truncate">
+                    {file.name} · {(file.size / 1024 / 1024).toFixed(1)} MB
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))
+                    }
+                    className="ml-3 text-xs font-medium text-rose-600"
+                  >
+                    Remove
+                  </button>
                 </li>
               ))}
             </ul>
           )}
         </div>
 
-        <button type="submit" disabled={submitting || (!!editingId && !canEditRequest)} className="btn-primary">
+        <button
+          type="submit"
+          disabled={submitting || (!!editingId && !canEditRequest)}
+          className="btn-primary"
+        >
           {submitting ? 'Saving…' : editingId ? 'Save AV request' : 'Submit AV request'}
         </button>
       </form>
 
       {!editingId && (
-        <section className="mt-8">
+        <section className="mt-6">
           <h2 className="text-lg font-semibold text-brand-navy">My AV requests</h2>
           <div className="mt-3 data-table-wrap">
-            <table className="data-table"><thead><tr><th>Date</th><th>Location</th><th>Equipment</th><th></th></tr></thead><tbody>
-              {(requests.data ?? []).filter((request) => request.requester_id === user?.id).map((request) => <tr key={request.id}><td>{request.requested_date}</td><td>{request.location}</td><td>{request.equipment.join(', ') || 'None'}</td><td>{request.requested_date >= localDate() ? <Link to={`/av-request?request=${request.id}`} className="font-medium text-brand-navy hover:underline">Edit</Link> : <span className="text-xs text-slate-500">Past</span>}</td></tr>)}
-              {requests.data?.filter((request) => request.requester_id === user?.id).length === 0 && <tr><td colSpan={4} className="text-center text-slate-500">No AV requests yet.</td></tr>}
-            </tbody></table>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Location</th>
+                  <th>Equipment</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {(requests.data ?? [])
+                  .filter((request) => request.requester_id === user?.id)
+                  .map((request) => (
+                    <tr key={request.id}>
+                      <td>{request.requested_date}</td>
+                      <td>{request.location}</td>
+                      <td>{request.equipment.join(', ') || 'None'}</td>
+                      <td>
+                        {request.requested_date >= localDate() ? (
+                          <Link
+                            to={`/av-request?request=${request.id}`}
+                            className="font-medium text-brand-navy hover:underline"
+                          >
+                            Edit
+                          </Link>
+                        ) : (
+                          <span className="text-xs text-slate-500">Past</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                {requests.data?.filter((request) => request.requester_id === user?.id).length ===
+                  0 && (
+                  <tr>
+                    <td colSpan={4} className="text-center text-slate-500">
+                      No AV requests yet.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </section>
       )}
-
     </section>
   );
 }

@@ -114,6 +114,13 @@
   .data-table tbody td {
     @apply px-4 py-3;
   }
+  .ticket-list-table thead th,
+  .ticket-list-table tbody td {
+    @apply px-3 py-1 leading-4;
+  }
+  .ticket-list-table tbody select {
+    @apply h-6 py-0 text-xs;
+  }
   .ref-link {
     @apply font-mono text-[13px] font-semibold text-brand-navy transition-colors hover:text-brand-navy-hover hover:underline;
   }

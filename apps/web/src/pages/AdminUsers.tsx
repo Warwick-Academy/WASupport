@@ -50,13 +50,16 @@ export default function AdminUsers() {
     setEmulationError(null);
     setIsStartingEmulation(true);
     try {
-      await startImpersonation({
-        id: emulatingUser.id,
-        email: emulatingUser.email,
-        fullName: emulatingUser.full_name,
-        role: emulatingUser.role,
-        department: emulatingUser.department,
-      }, emulationReason);
+      await startImpersonation(
+        {
+          id: emulatingUser.id,
+          email: emulatingUser.email,
+          fullName: emulatingUser.full_name,
+          role: emulatingUser.role,
+          department: emulatingUser.department,
+        },
+        emulationReason,
+      );
       navigate('/', { replace: true });
     } catch (error) {
       setEmulationError(error instanceof Error ? error.message : 'Could not start emulation.');
@@ -152,7 +155,8 @@ export default function AdminUsers() {
               error_description?: string;
               error?: string;
             };
-            detail = parsed.message ?? parsed.msg ?? parsed.error_description ?? parsed.error ?? detail;
+            detail =
+              parsed.message ?? parsed.msg ?? parsed.error_description ?? parsed.error ?? detail;
           } catch {
             // Keep the raw upstream response when it is not JSON.
           }
@@ -162,9 +166,11 @@ export default function AdminUsers() {
       return { existing: body.existing ?? false };
     },
     onSuccess: ({ existing }) => {
-      setCreateMsg(existing
-        ? `Existing account ${newEmail.trim()} added to user management with the selected role.`
-        : `Invitation sent to ${newEmail.trim()}.`);
+      setCreateMsg(
+        existing
+          ? `Existing account ${newEmail.trim()} added to user management with the selected role.`
+          : `Invitation sent to ${newEmail.trim()}.`,
+      );
       setNewEmail('');
       setNewName('');
       setNewRole('submitter');
@@ -188,7 +194,10 @@ export default function AdminUsers() {
             Department staff belong to IT Support, Facilities or Audio Visual. Technician roles set
             the department automatically; a <strong>Department Manager</strong> receives new tickets
             that can&apos;t be routed to a category owner. Category owners are set on the{' '}
-            <Link to="/admin/categories" className="underline">Categories</Link> page.
+            <Link to="/admin/categories" className="underline">
+              Categories
+            </Link>{' '}
+            page.
           </p>
         </div>
         <input
@@ -225,7 +234,9 @@ export default function AdminUsers() {
           className="card-pad mb-6 grid gap-3 md:grid-cols-5"
         >
           <div>
-            <label htmlFor="nu-email" className="field-label">Email</label>
+            <label htmlFor="nu-email" className="field-label">
+              Email
+            </label>
             <input
               id="nu-email"
               type="email"
@@ -237,7 +248,9 @@ export default function AdminUsers() {
             />
           </div>
           <div>
-            <label htmlFor="nu-name" className="field-label">Full name</label>
+            <label htmlFor="nu-name" className="field-label">
+              Full name
+            </label>
             <input
               id="nu-name"
               value={newName}
@@ -247,7 +260,9 @@ export default function AdminUsers() {
             />
           </div>
           <div>
-            <label htmlFor="nu-role" className="field-label">Role</label>
+            <label htmlFor="nu-role" className="field-label">
+              Role
+            </label>
             <select
               id="nu-role"
               value={newRole}
@@ -262,7 +277,9 @@ export default function AdminUsers() {
             </select>
           </div>
           <div>
-            <label htmlFor="nu-dept" className="field-label">Department</label>
+            <label htmlFor="nu-dept" className="field-label">
+              Department
+            </label>
             <DepartmentSelect
               id="nu-dept"
               role={newRole}
@@ -281,7 +298,8 @@ export default function AdminUsers() {
             </button>
           </div>
           <p className="md:col-span-5 text-xs text-slate-500">
-            An invitation email is sent via Supabase. The user sets their own password on first sign-in.
+            An invitation email is sent via Supabase. The user sets their own password on first
+            sign-in.
           </p>
         </form>
       )}
@@ -290,13 +308,15 @@ export default function AdminUsers() {
       {emulatingUser && (
         <form onSubmit={beginEmulation} className="card-pad mb-5 space-y-3">
           <div>
-            <h2 className="text-sm font-semibold text-slate-900">Emulate department account</h2>
+            <h2 className="text-sm font-semibold text-slate-900">Emulate user account</h2>
             <p className="mt-1 text-sm text-slate-600">
-              You will use {emulatingUser.full_name ?? emulatingUser.email}&apos;s account until you end emulation.
-              This action is recorded in the audit log.
+              You will use {emulatingUser.full_name ?? emulatingUser.email}&apos;s account until you
+              end emulation. This action is recorded in the audit log.
             </p>
           </div>
-          <label htmlFor="emulation-reason" className="field-label">Reason (required)</label>
+          <label htmlFor="emulation-reason" className="field-label">
+            Reason (required)
+          </label>
           <input
             id="emulation-reason"
             required
@@ -309,7 +329,11 @@ export default function AdminUsers() {
           />
           {emulationError && <p className="alert-error">{emulationError}</p>}
           <div className="flex flex-wrap gap-2">
-            <button type="submit" disabled={isStartingEmulation || emulationReason.trim().length < 5} className="btn-primary">
+            <button
+              type="submit"
+              disabled={isStartingEmulation || emulationReason.trim().length < 5}
+              className="btn-primary"
+            >
               {isStartingEmulation ? 'Starting…' : 'Start emulation'}
             </button>
             <button
@@ -347,60 +371,68 @@ export default function AdminUsers() {
               Submitters ({submitters.length})
             </button>
           </div>
-        <div className="data-table-wrap">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Email</th>
-                <th>Role</th>
-                {view === 'staff' && <th>Department</th>}
-                {view === 'staff' && <th>Emulation</th>}
-                <th>Joined</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((u) => (
-                <tr key={u.id}>
-                  <td className="font-medium text-slate-800">
-                    <Link to={`/admin/users/${u.id}`} className="hover:underline">
-                      {u.full_name ?? '—'}
-                    </Link>
-                  </td>
-                  <td className="text-slate-600">{u.email}</td>
-                  <td>
-                    <select
-                      value={u.role}
-                      disabled={updateProfile.isPending}
-                      onChange={(e) =>
-                        updateProfile.mutate({
-                          id: u.id,
-                          patch: { role: e.target.value as UserRole },
-                        })
-                      }
-                      className="field-select-sm"
-                    >
-                      {ASSIGNABLE_ROLES.map((r) => (
-                        <option key={r} value={r}>
-                          {ROLE_LABEL[r]}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  {view === 'staff' && (
-                    <td>
-                      <DepartmentSelect
-                        role={u.role}
-                        value={u.department}
-                        disabled={updateProfile.isPending}
-                        onChange={(d) => updateProfile.mutate({ id: u.id, patch: { department: d } })}
-                        className="field-select-sm"
-                      />
+          <div className="data-table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Role</th>
+                  {view === 'staff' && <th>Department</th>}
+                  <th>Emulation</th>
+                  <th>Joined</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((u) => (
+                  <tr key={u.id}>
+                    <td className="font-medium text-slate-800">
+                      <Link to={`/admin/users/${u.id}`} className="hover:underline">
+                        {u.full_name ?? '—'}
+                      </Link>
                     </td>
-                  )}
-                  {view === 'staff' && (
+                    <td className="text-slate-600">{u.email}</td>
                     <td>
-                      {['it_tech', 'fac_tech', 'hs_officer', 'av_admin', 'manager'].includes(u.role) ? (
+                      <select
+                        value={u.role}
+                        disabled={updateProfile.isPending}
+                        onChange={(e) =>
+                          updateProfile.mutate({
+                            id: u.id,
+                            patch: { role: e.target.value as UserRole },
+                          })
+                        }
+                        className="field-select-sm"
+                      >
+                        {ASSIGNABLE_ROLES.map((r) => (
+                          <option key={r} value={r}>
+                            {ROLE_LABEL[r]}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    {view === 'staff' && (
+                      <td>
+                        <DepartmentSelect
+                          role={u.role}
+                          value={u.department}
+                          disabled={updateProfile.isPending}
+                          onChange={(d) =>
+                            updateProfile.mutate({ id: u.id, patch: { department: d } })
+                          }
+                          className="field-select-sm"
+                        />
+                      </td>
+                    )}
+                    <td>
+                      {[
+                        'submitter',
+                        'it_tech',
+                        'fac_tech',
+                        'hs_officer',
+                        'av_admin',
+                        'manager',
+                      ].includes(u.role) ? (
                         <button
                           type="button"
                           onClick={() => {
@@ -412,24 +444,28 @@ export default function AdminUsers() {
                         >
                           Emulate
                         </button>
-                      ) : <span className="text-xs text-slate-400">—</span>}
+                      ) : (
+                        <span className="text-xs text-slate-400">—</span>
+                      )}
                     </td>
-                  )}
-                  <td className="text-xs text-slate-500">
-                    {new Date(u.created_at).toLocaleDateString()}
-                  </td>
-                </tr>
-              ))}
-              {rows.length === 0 && (
-                <tr>
-                  <td colSpan={view === 'staff' ? 6 : 4} className="text-center text-sm text-slate-400">
-                    No users.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+                    <td className="text-xs text-slate-500">
+                      {new Date(u.created_at).toLocaleDateString()}
+                    </td>
+                  </tr>
+                ))}
+                {rows.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={view === 'staff' ? 6 : 5}
+                      className="text-center text-sm text-slate-400"
+                    >
+                      No users.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </>
       )}
     </section>
@@ -455,7 +491,11 @@ function DepartmentSelect({
   const implied = ROLE_DEPARTMENT[role];
   if (role !== 'manager') {
     const label = implied ? DEPARTMENT_LABEL[implied] : '—';
-    return <span id={id} className="text-sm text-slate-600">{label}</span>;
+    return (
+      <span id={id} className="text-sm text-slate-600">
+        {label}
+      </span>
+    );
   }
   return (
     <select

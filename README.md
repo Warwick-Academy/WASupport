@@ -144,3 +144,39 @@ assignment-change audit snapshots. The CSV must include Assigned To; blanks are 
 The browser can download unresolved names; the command-line importer writes an
 adjacent `.unmatched-assignees.csv` report. Gary and Josh McCullough are not treated
 as the same person without an explicit approved mapping.
+
+## Event Setup requests
+
+Submitters can choose Help Desk, AV Request, or Event Setup from the home page.
+Event Setup requests support Exam desk rows and columns, round tables, and custom
+seat layouts with a generated section/row preview. Requests can include tables on
+stage, riser rows, weekly repeat days, special instructions, and a fast-turnaround
+flag. Facilities technicians, managers, and admins can review requests and update
+their status.
+
+The Event Setup calendar and request list are shown only to Facilities reviewers.
+This is a request schedule and does not reserve venues or check availability.
+Assembly and custom layouts support editable seating sections, rows, and seats per
+row with a generated seat map. Event requests can optionally include the same
+sectioned chair layout. Tables can be round or long. Apply the
+`20261015000001_event_setup_requests.sql` migration first, then
+`20261015000002_event_setup_seating_options.sql` and
+`20261015000003_event_setup_seat_placement.sql`, followed by
+`20261015000004_event_setup_section_positions.sql` and
+`20261015000005_event_setup_layout_elements.sql`, then
+`20261016000001_event_setup_repeats_and_tickets.sql`. Apply
+`20261016000002_event_setup_unassigned_facilities_tickets.sql` afterward to
+leave automatically created Facilities tickets unassigned when no eligible
+Facilities staff member is available. Requests support weekly or
+specific-date repeats. Every request appears on the Facilities calendar and
+creates a linked Facilities ticket, assigned to an eligible Facilities staff
+member when one is available or left unassigned otherwise. Tables may be
+requested with zero chairs. Sections and additional elements (tables, riser
+rows, and podium) can be positioned in the preview;
+Facilities can review the submitted layout and download a PDF with the event
+details and layout.
+
+Help Desk tickets now capture building and room as optional free text. Apply
+`20261016000003_clear_location_catalogue.sql` to clear the existing shared
+location catalogue; ticket location links are set to null, while existing
+building and room text on tickets is preserved.

@@ -1,10 +1,21 @@
-import { useState } from 'react';
-import { useNavigate, Navigate } from 'react-router-dom';
-import { useAuth } from '../lib/auth';
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate, Navigate, useSearchParams } from 'react-router-dom';
+import { SSO_AUTO_DISABLED_KEY, SSO_SILENT_ATTEMPTED_KEY, useAuth } from '../lib/auth';
+import { supabase } from '../lib/supabase';
+
+function shouldAutoSso(manual: boolean) {
+  if (!supabase || manual) return false;
+  return (
+    !sessionStorage.getItem(SSO_SILENT_ATTEMPTED_KEY) &&
+    !sessionStorage.getItem(SSO_AUTO_DISABLED_KEY)
+  );
+}
 
 export default function SignIn() {
   const { user, signIn, signUp, signInWithMicrosoft, loading } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const [autoSso, setAutoSso] = useState(() => shouldAutoSso(searchParams.has('manual')));
   const [mode, setMode] = useState<'in' | 'up'>('in');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -13,9 +24,36 @@ export default function SignIn() {
   const [ssoBusy, setSsoBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  const ssoStarted = useRef(false);
+
+  useEffect(() => {
+    if (loading || user || !autoSso || ssoStarted.current) return;
+    ssoStarted.current = true;
+    signInWithMicrosoft({ silent: true }).then((res) => {
+      if (res.error) setAutoSso(false);
+    });
+  }, [loading, user, autoSso, signInWithMicrosoft]);
 
   if (loading) return null;
   if (user) return <Navigate to="/" replace />;
+  if (autoSso) {
+    return (
+      <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center p-6 text-center">
+        <h1 className="text-2xl font-bold text-brand-navy">WA Support Center</h1>
+        <p className="mt-3 text-sm text-slate-500">Checking your Microsoft 365 sign-in…</p>
+        <button
+          type="button"
+          onClick={() => {
+            sessionStorage.setItem(SSO_AUTO_DISABLED_KEY, '1');
+            setAutoSso(false);
+          }}
+          className="mt-4 text-xs text-slate-400 underline hover:text-slate-600"
+        >
+          Use a password instead
+        </button>
+      </main>
+    );
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();

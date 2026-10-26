@@ -2,7 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import type { Handler } from '@netlify/functions';
 
-type TargetRole = 'it_tech' | 'fac_tech' | 'hs_officer' | 'av_admin' | 'manager';
+type TargetRole = 'submitter' | 'it_tech' | 'fac_tech' | 'hs_officer' | 'av_admin' | 'manager';
 type RequestBody = {
   action?: 'start' | 'stop';
   target_user_id?: string;
@@ -11,7 +11,14 @@ type RequestBody = {
   restore_token?: string;
 };
 
-const TARGET_ROLES: TargetRole[] = ['it_tech', 'fac_tech', 'hs_officer', 'av_admin', 'manager'];
+const TARGET_ROLES: TargetRole[] = [
+  'submitter',
+  'it_tech',
+  'fac_tech',
+  'hs_officer',
+  'av_admin',
+  'manager',
+];
 
 function json(statusCode: number, body: unknown) {
   return {
@@ -54,7 +61,9 @@ export const handler: Handler = async (event) => {
   if (body.action === 'start') {
     const reason = body.reason?.trim();
     if (!body.target_user_id || !reason || reason.length < 5 || reason.length > 500) {
-      return json(400, { error: 'Target user and an audit reason of 5–500 characters are required' });
+      return json(400, {
+        error: 'Target user and an audit reason of 5–500 characters are required',
+      });
     }
 
     const { data: actor, error: actorError } = await admin
@@ -72,9 +81,12 @@ export const handler: Handler = async (event) => {
       .maybeSingle();
     if (targetError) return json(500, { error: 'Could not load target account' });
     if (!target || !TARGET_ROLES.includes(target.role as TargetRole)) {
-      return json(400, { error: 'Only department members and managers can be emulated' });
+      return json(400, {
+        error: 'Only submitters, department members, and managers can be emulated',
+      });
     }
-    if (target.id === callerData.user.id) return json(400, { error: 'Cannot emulate your own account' });
+    if (target.id === callerData.user.id)
+      return json(400, { error: 'Cannot emulate your own account' });
 
     const { data: link, error: linkError } = await admin.auth.admin.generateLink({
       type: 'magiclink',
@@ -117,7 +129,11 @@ export const handler: Handler = async (event) => {
       .eq('id', body.audit_id)
       .maybeSingle();
     if (auditError) return json(500, { error: 'Could not verify the impersonation session' });
-    if (!audit || audit.ended_at || ![audit.target_user_id, audit.actor_user_id].includes(callerData.user.id)) {
+    if (
+      !audit ||
+      audit.ended_at ||
+      ![audit.target_user_id, audit.actor_user_id].includes(callerData.user.id)
+    ) {
       return json(403, { error: 'Invalid or expired impersonation session' });
     }
 

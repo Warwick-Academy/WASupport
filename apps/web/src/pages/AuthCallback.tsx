@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { SSO_AUTO_DISABLED_KEY, SSO_SILENT_ATTEMPTED_KEY } from '../lib/auth';
 
 /**
  * Handles redirects from Supabase auth emails (invite, recovery, magic link).
@@ -42,10 +43,13 @@ export default function AuthCallback() {
     const t = setTimeout(async () => {
       const { data } = await sb.auth.getSession();
       if (!data.session) {
-        // No session established — bounce to sign-in.
+        // No session established (e.g. silent Microsoft sign-in found no
+        // Office 365 session) — show the normal sign-in page.
         navigate('/signin', { replace: true });
         return;
       }
+      sessionStorage.removeItem(SSO_SILENT_ATTEMPTED_KEY);
+      sessionStorage.removeItem(SSO_AUTO_DISABLED_KEY);
       setReady(true);
     }, 250);
     return () => clearTimeout(t);

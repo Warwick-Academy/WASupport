@@ -4,17 +4,26 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/auth';
 import { Combobox } from '../components/Combobox';
-import { Mic, Square } from 'lucide-react';
+import { Camera, Mic, Square } from 'lucide-react';
 import { parseTicketDictation } from '../lib/dictation';
 import {
   DEPARTMENT_CATEGORY_ROOT,
   TICKET_DEPARTMENTS,
   type Category,
   type TicketDepartment,
-  type Location,
 } from '../lib/types';
 
 const OTHER_SUBCATEGORY = '__other__';
+const BUILDINGS = [
+  'Primary or Secondary',
+  'Reception',
+  'Barbara Hall',
+  'Marine Science',
+  'Science Building',
+  'N Building',
+  'Gymnasium',
+  'Other',
+] as const;
 
 interface SpeechRecognitionResultLike {
   0: { transcript: string };
@@ -52,11 +61,13 @@ export default function NewTicket() {
   const [categoryId, setCategoryId] = useState<string>('');
   const [subcategoryId, setSubcategoryId] = useState<string>('');
   const [otherSubcategory, setOtherSubcategory] = useState('');
-  const [locationId, setLocationId] = useState<string>('');
+  const [building, setBuilding] = useState('');
+  const [otherBuilding, setOtherBuilding] = useState('');
+  const [room, setRoom] = useState('');
   const [subject, setSubject] = useState('');
   const [description, setDescription] = useState('');
-  const [requestedFor, setRequestedFor] = useState('');
   const [photos, setPhotos] = useState<File[]>([]);
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
   const [voiceListening, setVoiceListening] = useState(false);
   const [voiceTranscript, setVoiceTranscript] = useState('');
   const [voiceError, setVoiceError] = useState<string | null>(null);
@@ -64,9 +75,12 @@ export default function NewTicket() {
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const transcriptRef = useRef('');
 
-  const managerDepartment = role === 'manager' && profile?.department &&
+  const managerDepartment =
+    role === 'manager' &&
+    profile?.department &&
     TICKET_DEPARTMENTS.includes(profile.department as TicketDepartment)
-    ? profile.department as TicketDepartment : null;
+      ? (profile.department as TicketDepartment)
+      : null;
   const canUseVoice = !!managerDepartment;
 
   const categoriesQ = useQuery({
@@ -85,36 +99,28 @@ export default function NewTicket() {
 
   useEffect(() => {
     if (!managerDepartment || categoryId) return;
-    const root = categoriesQ.data?.find((category) =>
-      category.department === managerDepartment && category.parent_id === null &&
-      normalizeCategoryName(category.name) === normalizeCategoryName(DEPARTMENT_CATEGORY_ROOT[managerDepartment]),
+    const root = categoriesQ.data?.find(
+      (category) =>
+        category.department === managerDepartment &&
+        category.parent_id === null &&
+        normalizeCategoryName(category.name) ===
+          normalizeCategoryName(DEPARTMENT_CATEGORY_ROOT[managerDepartment]),
     );
     if (root) setCategoryId(root.id);
   }, [managerDepartment, categoryId, categoriesQ.data]);
 
-  useEffect(() => () => {
-    const recognition = recognitionRef.current;
-    if (recognition) {
-      recognition.onresult = null;
-      recognition.onerror = null;
-      recognition.onend = null;
-      recognition.stop();
-    }
-  }, []);
-
-  const locationsQ = useQuery({
-    queryKey: ['locations'],
-    queryFn: async (): Promise<Location[]> => {
-      if (!supabase) throw new Error('Supabase not configured');
-      const { data, error } = await supabase
-        .from('locations')
-        .select('*')
-        .eq('is_active', true)
-        .order('building');
-      if (error) throw error;
-      return data as Location[];
+  useEffect(
+    () => () => {
+      const recognition = recognitionRef.current;
+      if (recognition) {
+        recognition.onresult = null;
+        recognition.onerror = null;
+        recognition.onend = null;
+        recognition.stop();
+      }
     },
-  });
+    [],
+  );
 
   const submit = useMutation({
     mutationFn: async () => {
@@ -130,10 +136,10 @@ export default function NewTicket() {
             subcategoryId && subcategoryId !== OTHER_SUBCATEGORY ? subcategoryId : null,
           legacy_subcategory:
             subcategoryId === OTHER_SUBCATEGORY ? otherSubcategory.trim() || null : null,
-          location_id: locationId || null,
+          building: building === 'Other' ? otherBuilding.trim() || null : building || null,
+          room: room.trim() || null,
           subject,
           description,
-          requested_for: requestedFor.trim() || null,
           submitter_id: user.id,
         })
         .select('id, ref')
@@ -167,7 +173,9 @@ export default function NewTicket() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['tickets'] });
       if (data.attachmentErrors.length > 0) {
-        window.alert(`Ticket submitted, but some photos could not be attached:\n${data.attachmentErrors.join('\n')}`);
+        window.alert(
+          `Ticket submitted, but some photos could not be attached:\n${data.attachmentErrors.join('\n')}`,
+        );
       }
       navigate(`/tickets/${data.id}`);
     },
@@ -182,19 +190,22 @@ export default function NewTicket() {
         normalizeCategoryName(category.name) ===
           normalizeCategoryName(DEPARTMENT_CATEGORY_ROOT[department]),
     );
-    return root
-      ? [{ value: root.id, label: DEPARTMENT_CATEGORY_ROOT[department] }]
-      : [];
+    return root ? [{ value: root.id, label: DEPARTMENT_CATEGORY_ROOT[department] }] : [];
   });
   const filteredSubcategories =
-    categoriesQ.data?.filter((category) => category.parent_id === categoryId && category.is_active) ?? [];
+    categoriesQ.data?.filter(
+      (category) => category.parent_id === categoryId && category.is_active,
+    ) ?? [];
 
   function applyVoiceTranscript(transcript: string) {
     setVoiceTranscript(transcript);
     const fields = parseTicketDictation(transcript);
     if (fields.subject) setSubject(fields.subject);
     if (fields.description !== null) setDescription(fields.description);
-    else setVoiceError('Subject captured. No Description separator was heard; enter the description below or try again.');
+    else
+      setVoiceError(
+        'Subject captured. No Description separator was heard; enter the description below or try again.',
+      );
   }
 
   function toggleVoiceEntry() {
@@ -203,7 +214,8 @@ export default function NewTicket() {
       recognitionRef.current?.stop();
       return;
     }
-    const SpeechRecognition = (window as SpeechRecognitionWindow).SpeechRecognition ??
+    const SpeechRecognition =
+      (window as SpeechRecognitionWindow).SpeechRecognition ??
       (window as SpeechRecognitionWindow).webkitSpeechRecognition;
     if (!SpeechRecognition) {
       setVoiceError('Voice entry is not supported in this browser. Try the latest Chrome or Edge.');
@@ -221,9 +233,11 @@ export default function NewTicket() {
       setVoiceTranscript(transcriptRef.current);
     };
     recognition.onerror = (event) => {
-      setVoiceError(event.error === 'not-allowed'
-        ? 'Allow microphone access in your browser to use voice entry.'
-        : `Voice entry stopped: ${event.error}.`);
+      setVoiceError(
+        event.error === 'not-allowed'
+          ? 'Allow microphone access in your browser to use voice entry.'
+          : `Voice entry stopped: ${event.error}.`,
+      );
     };
     recognition.onend = () => {
       recognitionRef.current = null;
@@ -237,40 +251,67 @@ export default function NewTicket() {
     } catch (startError) {
       recognitionRef.current = null;
       setVoiceListening(false);
-      setVoiceError(startError instanceof Error ? startError.message : 'Could not start voice entry.');
+      setVoiceError(
+        startError instanceof Error ? startError.message : 'Could not start voice entry.',
+      );
     }
   }
 
   return (
     <section className="mx-auto max-w-2xl">
       <h1 className="page-title">Submit a ticket</h1>
-      <p className="page-subtitle">
+      <p className="page-subtitle !mb-4">
         A team member will review your request and assign a priority and owner shortly.
       </p>
 
       {canUseVoice && (
         <div className="card-pad mb-5 space-y-3">
-          <p className="text-base font-semibold text-brand-navy">Enter Subject and Description by voice</p>
+          <p className="text-base font-semibold text-brand-navy">
+            Enter Subject and Description by voice
+          </p>
           <ol className="list-inside list-decimal text-sm text-slate-600">
             <li>Press the green Start voice entry button.</li>
             <li>Say the subject first.</li>
-            <li>Say <strong>Description:</strong> (or "description colon"), then describe the issue.</li>
+            <li>
+              Say <strong>Description:</strong> (or "description colon"), then describe the issue.
+            </li>
             <li>Press the red Stop voice entry button, then review and edit both fields.</li>
           </ol>
-          <p className="text-sm text-slate-600">Example: "Broken chair. Description: The chair in room 12 has a loose leg."</p>
-          <p className="text-sm text-slate-600">Your department is selected automatically. Subcategory, location, and who the ticket is for are optional and entered manually.</p>
+          <p className="text-sm text-slate-600">
+            Example: "Broken chair. Description: The chair in room 12 has a loose leg."
+          </p>
+          <p className="text-sm text-slate-600">
+            Your department is selected automatically. Subcategory and location/room are optional
+            and entered manually.
+          </p>
           <button
             type="button"
             onClick={toggleVoiceEntry}
             aria-pressed={voiceListening}
             className={`btn text-white ${voiceListening ? 'bg-red-700 hover:bg-red-800' : 'bg-green-700 hover:bg-green-800'}`}
           >
-            {voiceListening ? <Square aria-hidden="true" size={20} /> : <Mic aria-hidden="true" size={20} />}
+            {voiceListening ? (
+              <Square aria-hidden="true" size={20} />
+            ) : (
+              <Mic aria-hidden="true" size={20} />
+            )}
             {voiceListening ? 'Stop voice entry' : 'Start voice entry'}
           </button>
-          {voiceListening && <p role="status" className="text-sm font-semibold text-red-700">Listening. Press Stop voice entry when finished.</p>}
-          {voiceError && <p role="alert" className="alert-error">{voiceError}</p>}
-          {voiceTranscript && <p className="whitespace-pre-wrap text-xs text-slate-500">Transcript: {voiceTranscript}</p>}
+          {voiceListening && (
+            <p role="status" className="text-sm font-semibold text-red-700">
+              Listening. Press Stop voice entry when finished.
+            </p>
+          )}
+          {voiceError && (
+            <p role="alert" className="alert-error">
+              {voiceError}
+            </p>
+          )}
+          {voiceTranscript && (
+            <p className="whitespace-pre-wrap text-xs text-slate-500">
+              Transcript: {voiceTranscript}
+            </p>
+          )}
         </div>
       )}
 
@@ -280,9 +321,9 @@ export default function NewTicket() {
           setError(null);
           if (!voiceListening) submit.mutate();
         }}
-        className="card-pad space-y-6"
+        className="card-pad space-y-4 !p-5 sm:!p-6"
       >
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-x-4 gap-y-3 md:grid-cols-2">
           <div>
             <label htmlFor="category" className="field-label">
               Department
@@ -316,7 +357,9 @@ export default function NewTicket() {
             >
               <option value="">Select a subcategory</option>
               {filteredSubcategories.map((category) => (
-                <option key={category.id} value={category.id}>{category.name}</option>
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
               ))}
               {categoryId && <option value={OTHER_SUBCATEGORY}>Other</option>}
             </select>
@@ -339,15 +382,54 @@ export default function NewTicket() {
           )}
 
           <div>
-            <label htmlFor="location" className="field-label">
-              Location (optional)
+            <label htmlFor="building" className="field-label">
+              Building (optional)
             </label>
-            <Combobox
-              id="location"
-              options={(locationsQ.data ?? []).map((l) => ({ value: l.id, label: l.label }))}
-              value={locationId}
-              onChange={setLocationId}
-              placeholder="Type to search locations…"
+            <select
+              id="building"
+              value={building}
+              onChange={(event) => {
+                setBuilding(event.target.value);
+                if (event.target.value !== 'Other') setOtherBuilding('');
+              }}
+              className="field-select"
+            >
+              <option value="">Select a building</option>
+              {BUILDINGS.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {building === 'Other' && (
+            <div>
+              <label htmlFor="other-building" className="field-label">
+                Other building
+              </label>
+              <input
+                id="other-building"
+                maxLength={200}
+                value={otherBuilding}
+                onChange={(event) => setOtherBuilding(event.target.value)}
+                placeholder="Enter building name"
+                className="field"
+              />
+            </div>
+          )}
+
+          <div>
+            <label htmlFor="room" className="field-label">
+              Room (optional)
+            </label>
+            <input
+              id="room"
+              maxLength={100}
+              value={room}
+              onChange={(event) => setRoom(event.target.value)}
+              placeholder="Room number or name"
+              className="field"
             />
           </div>
         </div>
@@ -374,7 +456,7 @@ export default function NewTicket() {
           <textarea
             id="description"
             required
-            rows={6}
+            rows={5}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Please describe the issue, what you've already tried, and how urgent it is."
@@ -383,41 +465,44 @@ export default function NewTicket() {
         </div>
 
         <div>
-          <label htmlFor="requested-for" className="field-label">Who is this ticket for? (optional)</label>
-          <input
-            id="requested-for"
-            maxLength={200}
-            value={requestedFor}
-            onChange={(event) => setRequestedFor(event.target.value)}
-            placeholder="Name or department"
-            className="field"
-          />
-        </div>
-
-        <div>
           <span className="field-label">Photos</span>
-          <label className="btn-secondary inline-flex cursor-pointer items-center">
-            Take or choose photos
-            <input
-              type="file"
-              accept="image/png,image/jpeg,image/webp,image/gif"
-              capture="environment"
-              multiple
-              className="sr-only"
-              onChange={(event) => {
-                const selected = Array.from(event.target.files ?? []);
-                setPhotos((current) => [...current, ...selected].slice(0, 3));
-                event.target.value = '';
-              }}
-            />
-          </label>
+          <button
+            type="button"
+            onClick={() => photoInputRef.current?.click()}
+            className="btn-primary px-4 py-2.5"
+          >
+            <Camera aria-hidden="true" size={18} />
+            Take a photo or add a picture
+          </button>
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            capture="environment"
+            multiple
+            className="sr-only"
+            onChange={(event) => {
+              const selected = Array.from(event.target.files ?? []);
+              setPhotos((current) => [...current, ...selected].slice(0, 3));
+              event.target.value = '';
+            }}
+          />
           <p className="mt-1 text-xs text-slate-500">Up to 3 images, 10 MB each.</p>
           {photos.length > 0 && (
             <ul className="mt-2 space-y-1 text-sm text-slate-600">
               {photos.map((photo, index) => (
-                <li key={`${photo.name}-${photo.lastModified}`} className="flex items-center justify-between gap-3">
+                <li
+                  key={`${photo.name}-${photo.lastModified}`}
+                  className="flex items-center justify-between gap-3"
+                >
                   <span className="truncate">{photo.name}</span>
-                  <button type="button" onClick={() => setPhotos((current) => current.filter((_, i) => i !== index))} className="text-xs text-rose-700 hover:underline">Remove</button>
+                  <button
+                    type="button"
+                    onClick={() => setPhotos((current) => current.filter((_, i) => i !== index))}
+                    className="text-xs text-rose-700 hover:underline"
+                  >
+                    Remove
+                  </button>
                 </li>
               ))}
             </ul>
@@ -434,7 +519,11 @@ export default function NewTicket() {
           <button type="button" onClick={() => navigate(-1)} className="btn-ghost">
             Cancel
           </button>
-          <button type="submit" disabled={submit.isPending || voiceListening} className="btn-primary">
+          <button
+            type="submit"
+            disabled={submit.isPending || voiceListening}
+            className="btn-primary"
+          >
             {submit.isPending ? 'Submitting…' : 'Submit ticket'}
           </button>
         </div>

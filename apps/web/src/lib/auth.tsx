@@ -27,6 +27,9 @@ type StoredImpersonation = ActiveImpersonation & {
 };
 
 const IMPERSONATION_STORAGE_KEY = 'academydesk.admin-impersonation';
+export const SSO_SILENT_ATTEMPTED_KEY = 'academydesk.sso-silent-attempted';
+export const SSO_AUTO_DISABLED_KEY = 'academydesk.sso-auto-disabled';
+const SSO_DOMAIN_HINT = 'warwick.bm';
 
 function storedImpersonation(): StoredImpersonation | null {
   try {
@@ -55,7 +58,7 @@ type AuthCtx = {
   stopImpersonation: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<{ error?: string }>;
   signUp: (email: string, password: string, fullName: string) => Promise<{ error?: string }>;
-  signInWithMicrosoft: () => Promise<{ error?: string }>;
+  signInWithMicrosoft: (opts?: { silent?: boolean }) => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
 };
 
@@ -253,19 +256,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       return error ? { error: error.message } : {};
     },
-    signInWithMicrosoft: async () => {
+    signInWithMicrosoft: async (opts) => {
       if (!supabase) return { error: 'Supabase not configured' };
+      if (opts?.silent) sessionStorage.setItem(SSO_SILENT_ATTEMPTED_KEY, '1');
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'azure',
         options: {
           scopes: 'openid email profile offline_access Calendars.ReadWrite',
           redirectTo: `${window.location.origin}/auth/callback`,
+          // prompt=none makes Microsoft reuse an existing Office 365 session
+          // without showing UI, or return an error we fall back from.
+          queryParams: opts?.silent
+            ? { prompt: 'none', domain_hint: SSO_DOMAIN_HINT }
+            : { domain_hint: SSO_DOMAIN_HINT },
         },
       });
       return error ? { error: error.message } : {};
     },
     signOut: async () => {
       if (!supabase) return;
+      sessionStorage.setItem(SSO_AUTO_DISABLED_KEY, '1');
       if (storedImpersonation()) await stopImpersonation();
       await supabase.auth.signOut();
     },

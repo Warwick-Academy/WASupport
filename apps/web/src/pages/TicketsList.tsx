@@ -3,7 +3,6 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/auth';
-import { useDepartmentKpis } from '../lib/useDepartmentKpis';
 import {
   DEPARTMENT_LABEL,
   PRIORITY_BADGE,
@@ -38,6 +37,8 @@ type AssignablePerson = AssigneeOption & { role: UserRole; department: Departmen
 
 const CLOSED_STATUSES = ['resolved', 'closed'] as const;
 const UNCATEGORIZED_PAGE_SIZE = 100;
+const TICKET_LIST_COLUMNS =
+  'id,ref,legacy_ref,department,subject,status,priority,submitter_id,assignee_id,created_at,legacy_submitter_name,legacy_assignee_name';
 const ASSIGNEE_ROLES: UserRole[] = [
   'it_tech', 'fac_tech', 'hs_officer', 'av_admin', 'manager', 'admin',
 ];
@@ -111,22 +112,26 @@ export default function TicketsList() {
     cutoff.setMonth(cutoff.getMonth() - 1);
     return dateKey(cutoff);
   }, []);
-  const ticketStatsRange = useMemo(() => {
-    const to = new Date();
-    const from = new Date();
-    from.setDate(to.getDate() - 6);
-    return { from: dateKey(from), to: dateKey(to) };
-  }, []);
-
   const dept = profile?.department && TICKET_DEPARTMENTS.includes(profile.department as TicketDepartment)
     ? profile.department as TicketDepartment
     : null;
   const filterDepartment = selectedDepartment === 'all' ? dept : selectedDepartment;
   const hasDept = !!filterDepartment;
-  const ticketStatsQ = useDepartmentKpis(ticketStatsRange.from, ticketStatsRange.to, isTicketStaff, user?.id);
-  const ticketStats = (ticketStatsQ.data ?? []).filter(
-    (row) => selectedDepartment === 'all' || row.department === selectedDepartment,
-  );
+  const ticketCountsQ = useQuery({
+    queryKey: ['ticket-status-counts', user?.id],
+    enabled: !!user && !!supabase,
+    retry: false,
+    queryFn: async (): Promise<{ open_tickets: number; closed_tickets: number; unassigned_tickets: number }> => {
+      if (!supabase) throw new Error('Supabase not configured');
+      const { data, error } = await supabase
+        .rpc('ticket_status_counts')
+        .abortSignal(AbortSignal.timeout(12_000));
+      if (error) throw error;
+      const counts = data?.[0];
+      if (!counts) throw new Error('Ticket counts were not returned');
+      return counts;
+    },
+  });
 
   const assignablePeopleQ = useQuery({
     queryKey: ['ticket-assignable-people', user?.id],
@@ -155,6 +160,7 @@ export default function TicketsList() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['tickets'] });
       void queryClient.invalidateQueries({ queryKey: ['department-kpis'] });
+      void queryClient.invalidateQueries({ queryKey: ['ticket-status-counts'] });
     },
   });
 
@@ -167,6 +173,7 @@ export default function TicketsList() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['tickets'] });
       void queryClient.invalidateQueries({ queryKey: ['department-kpis'] });
+      void queryClient.invalidateQueries({ queryKey: ['ticket-status-counts'] });
     },
   });
 
@@ -176,13 +183,13 @@ export default function TicketsList() {
       uncategorizedCutoff, status, dashboardView, from, to,
     ],
     enabled: !!user,
-    queryFn: async (): Promise<{ tickets: Ticket[]; count: number }> => {
+    queryFn: async (): Promise<{ tickets: Ticket[]; count: number | null; hasNext: boolean }> => {
       if (!supabase) throw new Error('Supabase not configured');
       let q = dashboardView
         ? supabase.rpc('dashboard_ticket_drilldown', {
             metric: dashboardView, from_date: from!, to_date: to!,
           }, { count: 'exact' })
-        : supabase.from('tickets').select('*', { count: 'exact' });
+        : supabase.from('tickets').select(TICKET_LIST_COLUMNS);
 
       if (!dashboardView && filter === 'mine') {
         if (isTicketStaff && user) {
@@ -191,10 +198,10 @@ export default function TicketsList() {
           q = q.eq('submitter_id', user.id);
         }
       } else if (!dashboardView && filter === 'open_dept') {
-        if (!filterDepartment) return { tickets: [], count: 0 };
+        if (!filterDepartment) return { tickets: [], count: 0, hasNext: false };
         q = q.eq('department', filterDepartment).not('status', 'in', `(${CLOSED_STATUSES.join(',')})`);
       } else if (!dashboardView && filter === 'closed_dept') {
-        if (!filterDepartment) return { tickets: [], count: 0 };
+        if (!filterDepartment) return { tickets: [], count: 0, hasNext: false };
         q = q.eq('department', filterDepartment).in('status', CLOSED_STATUSES as unknown as string[]);
       } else if (!dashboardView && filter === 'uncategorized') {
         q = q
@@ -218,14 +225,16 @@ export default function TicketsList() {
       q = q.order('created_at', { ascending: false }).order('id');
       q = q.range(
         uncategorizedPage * UNCATEGORIZED_PAGE_SIZE,
-        (uncategorizedPage + 1) * UNCATEGORIZED_PAGE_SIZE - 1,
+        uncategorizedPage * UNCATEGORIZED_PAGE_SIZE + UNCATEGORIZED_PAGE_SIZE,
       );
 
       const { data, error, count } = await q;
       if (error) throw error;
+      const pageRows = data ?? [];
       return {
-        tickets: (data ?? []) as Ticket[],
-        count: count ?? data?.length ?? 0,
+        tickets: pageRows.slice(0, UNCATEGORIZED_PAGE_SIZE) as Ticket[],
+        count: dashboardView ? count ?? pageRows.length : null,
+        hasNext: pageRows.length > UNCATEGORIZED_PAGE_SIZE,
       };
     },
   });
@@ -379,7 +388,7 @@ export default function TicketsList() {
         <div>
           <h1 className="page-title">Tickets</h1>
           <p className="text-sm italic text-slate-500">{dashboardView
-            ? `${({ new: 'New tickets', open: 'Open at period end', unassigned: 'Unassigned at period end', resolved: 'Resolved tickets' } as Record<string, string>)[dashboardView]} from ${from} to ${to}.`
+            ? `${({ new: 'New tickets', open: 'Open at period end', unassigned: 'Unassigned at period end', resolved: 'Closed tickets' } as Record<string, string>)[dashboardView]} from ${from} to ${to}.`
             : FILTER_DESCRIPTIONS[filter]}</p>
           {dashboardView && <Link to="/dashboard" className="text-sm text-brand-navy hover:underline">Back to dashboard</Link>}
         </div>
@@ -388,7 +397,32 @@ export default function TicketsList() {
         </Link>
       </div>
 
-      <div className="mb-4 flex flex-wrap items-center gap-2">
+      <section className="mb-3" aria-label="Ticket counts">
+        {ticketCountsQ.error ? (
+          <div className="mb-2 alert-error" role="alert">
+            <p>Ticket statistics could not load: {(ticketCountsQ.error as Error).message}</p>
+            <button type="button" className="mt-1 font-semibold underline" onClick={() => void ticketCountsQ.refetch()}>
+              Retry statistics
+            </button>
+          </div>
+        ) : null}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {([
+            ['Open tickets', ticketCountsQ.data?.open_tickets],
+            ['Closed tickets', ticketCountsQ.data?.closed_tickets],
+            ['Unassigned tickets', ticketCountsQ.data?.unassigned_tickets],
+          ] as const).map(([label, count]) => (
+            <div key={label} className="rounded-lg border border-slate-200 border-l-[3px] border-l-brand-navy bg-white px-4 py-3 shadow-card">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+              <p className="mt-1 text-3xl font-bold leading-none text-slate-900">
+                {count === undefined ? (ticketCountsQ.isError ? 'Unavailable' : 'Loading…') : Number(count).toLocaleString()}
+              </p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <div className="mb-3 flex flex-wrap items-center gap-2">
         <input
           type="search"
           value={search}
@@ -496,34 +530,6 @@ export default function TicketsList() {
         </button>
       </div>
 
-      {isTicketStaff && (
-        <section className="mb-4 rounded-lg border border-slate-200 bg-white px-3 py-2.5" aria-label="Department ticket summary">
-          <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-            <h2 className="text-xs font-semibold uppercase text-slate-600">Department summary</h2>
-            <span className="text-xs text-slate-500">New and resolved: {ticketStatsRange.from} to {ticketStatsRange.to} · Open and unassigned at period end</span>
-          </div>
-          {ticketStatsQ.isLoading ? (
-            <p className="text-sm text-slate-500">Loading department counts…</p>
-          ) : ticketStatsQ.error ? (
-            <p className="text-sm text-rose-700">{(ticketStatsQ.error as Error).message}</p>
-          ) : ticketStats.length === 0 ? (
-            <p className="text-sm text-slate-500">No departments selected.</p>
-          ) : (
-            <div className="flex flex-wrap gap-x-6 gap-y-2">
-              {ticketStats.map((row) => (
-                <div key={row.department} className="flex flex-wrap items-baseline gap-x-2 text-xs">
-                  <span className="font-semibold text-slate-800">{DEPARTMENT_LABEL[row.department]}</span>
-                  <span className="text-slate-600">
-                    New {row.new_tickets} · Open {row.open_tickets} · Unassigned {row.unassigned}
-                    {' '}· Resolved {row.resolved_tickets} · Uncategorised (last month) {row.uncategorized_tickets}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-      )}
-
       {isLoading && <p className="text-sm text-slate-500">Loading tickets…</p>}
       {error && <p className="alert-error">{(error as Error).message}</p>}
       {assignTicket.error && <p className="alert-error">Could not save assignment: {(assignTicket.error as Error).message}</p>}
@@ -546,7 +552,7 @@ export default function TicketsList() {
 
       {data && data.length > 0 && (
         <div className="data-table-wrap">
-          <table className="data-table [&_th]:px-3 [&_td]:px-3">
+          <table className="data-table ticket-list-table">
             <thead>
               <tr>
                 <SortHeading column="ref">Ticket ID</SortHeading>
@@ -643,11 +649,12 @@ export default function TicketsList() {
         </div>
       )}
 
-      {ticketResult && ticketResult.count > 0 && (
+      {ticketResult && (ticketResult.count === null ? (data?.length ?? 0) > 0 : ticketResult.count > 0) && (
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600">
           <span>
-            {ticketResult.count.toLocaleString()} tickets · page {uncategorizedPage + 1} of{' '}
-            {Math.ceil(ticketResult.count / UNCATEGORIZED_PAGE_SIZE).toLocaleString()}
+            {ticketResult.count !== null
+              ? `${ticketResult.count.toLocaleString()} tickets · page ${uncategorizedPage + 1} of ${Math.ceil(ticketResult.count / UNCATEGORIZED_PAGE_SIZE).toLocaleString()}`
+              : `Showing ${uncategorizedPage * UNCATEGORIZED_PAGE_SIZE + 1}–${uncategorizedPage * UNCATEGORIZED_PAGE_SIZE + (data?.length ?? 0)} tickets${ticketResult.hasNext ? ' · more available' : ''}`}
           </span>
           <div className="flex gap-2">
             <button
@@ -661,7 +668,7 @@ export default function TicketsList() {
             <button
               type="button"
               onClick={() => setUncategorizedPage((page) => page + 1)}
-              disabled={(uncategorizedPage + 1) * UNCATEGORIZED_PAGE_SIZE >= ticketResult.count}
+              disabled={!ticketResult.hasNext}
               className="btn-secondary px-3 py-1.5 disabled:opacity-50"
             >
               Next

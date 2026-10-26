@@ -26,6 +26,7 @@ import AdminTicketImport from './pages/AdminTicketImport';
 import AvRequest from './pages/AvRequest';
 import AvAdmin from './pages/AvAdmin';
 import DepartmentReports from './pages/DepartmentReports';
+import EventSetup from './pages/EventSetup';
 
 function TicketsRoute() {
   const { search } = useLocation();
@@ -48,6 +49,7 @@ export default function App() {
           <Route path="/tickets" element={<TicketsRoute />} />
           <Route path="/new" element={<NewTicket />} />
           <Route path="/av-request" element={<AvRequest />} />
+          <Route path="/event-setup" element={<EventSetup />} />
           <Route path="/tickets/:id" element={<TicketDetail />} />
           <Route path="/queue" element={<LegacyQueueRedirect />} />
           <Route element={<RequireStaff />}>
