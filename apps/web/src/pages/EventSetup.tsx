@@ -10,6 +10,8 @@ const REQUEST_STATUSES = ['pending', 'scheduled', 'declined', 'completed'] as co
 type SetupType = 'exam' | 'event' | 'assembly' | 'custom';
 type RequestStatus = (typeof REQUEST_STATUSES)[number];
 type LayoutPosition = { x: number; y: number };
+type EventSetupEquipment = 'Laptop' | 'Screen';
+const EVENT_SETUP_EQUIPMENT: EventSetupEquipment[] = ['Laptop', 'Screen'];
 type EventSetupRequest = {
   id: string;
   requester_id: string;
@@ -28,6 +30,7 @@ type EventSetupRequest = {
   seat_rows: number | null;
   seat_sections: number | null;
   seats_per_section_row: number | null;
+  seat_back_row_chairs: number;
   seat_placement: 'left' | 'right' | 'center';
   seat_section_offsets: Record<string, number> | null;
   layout_element_positions: Record<string, LayoutPosition> | null;
@@ -46,6 +49,7 @@ type EventSetupRequest = {
   created_at: string;
   recurrence_dates: string[];
   ticket_id: string | null;
+  equipment: EventSetupEquipment[];
 };
 
 function dateKey(date: Date) {
@@ -152,6 +156,10 @@ function configurationSummary(request: EventSetupRequest) {
       details.push(`Placement: ${placement}`);
     }
   }
+  if (request.seat_back_row_chairs > 0) {
+    details.push(`Back row away from stage: ${request.seat_back_row_chairs} chairs`);
+  }
+  if (request.equipment.length) details.push(`Equipment: ${request.equipment.join(', ')}`);
   if (request.round_table_count) {
     details.push(
       `${request.round_table_count} ${request.table_type} tables${request.chairs_per_table ? ` · ${request.chairs_per_table} chairs each` : ''}`,
@@ -239,6 +247,7 @@ function HallSeatMap({
   sections,
   rows,
   seatsPerRow,
+  backRowChairs = 0,
   placement,
   offsets = {},
   onOffsetsChange,
@@ -247,6 +256,7 @@ function HallSeatMap({
   sections: number;
   rows: number;
   seatsPerRow: number;
+  backRowChairs?: number;
   placement: 'left' | 'right' | 'center';
   offsets?: Record<string, number>;
   onOffsetsChange?: (offsets: Record<string, number>) => void;
@@ -361,48 +371,63 @@ function HallSeatMap({
       CENTER AISLE
     </div>
   );
+  const backRow = backRowChairs > 0 && (
+    <div className="mx-auto mt-3 flex w-fit justify-center">
+      <SeatBlock
+        section="Back row · away from stage"
+        rows={1}
+        seatsPerRow={backRowChairs}
+        align="left"
+      />
+    </div>
+  );
 
   if (sections === 1 && placement === 'center') {
     return (
+      <div className="space-y-2">
+        <div
+          ref={mapRef}
+          className="mx-auto grid w-full min-w-[36rem] grid-cols-[1fr_auto_1fr] items-stretch gap-1"
+        >
+          <SeatBlock
+            section="Section 1 · Left"
+            rows={rows}
+            seatsPerRow={Math.ceil(seatsPerRow / 2)}
+            align="right"
+            {...movableProps('Section 1 · Left')}
+          />
+          {aisle}
+          <SeatBlock
+            section="Section 1 · Right"
+            rows={rows}
+            seatsPerRow={Math.floor(seatsPerRow / 2)}
+            align="left"
+            {...movableProps('Section 1 · Right')}
+          />
+        </div>
+        {backRow}
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-2">
       <div
         ref={mapRef}
         className="mx-auto grid w-full min-w-[36rem] grid-cols-[1fr_auto_1fr] items-stretch gap-1"
       >
-        <SeatBlock
-          section="Section 1 · Left"
-          rows={rows}
-          seatsPerRow={Math.ceil(seatsPerRow / 2)}
-          align="right"
-          {...movableProps('Section 1 · Left')}
-        />
+        {leftCount === 0 ? (
+          <div />
+        ) : (
+          <div className="flex items-start justify-end gap-1">{leftSections}</div>
+        )}
         {aisle}
-        <SeatBlock
-          section="Section 1 · Right"
-          rows={rows}
-          seatsPerRow={Math.floor(seatsPerRow / 2)}
-          align="left"
-          {...movableProps('Section 1 · Right')}
-        />
+        {rightCount === 0 ? (
+          <div />
+        ) : (
+          <div className="flex items-start justify-start gap-1">{rightSections}</div>
+        )}
       </div>
-    );
-  }
-
-  return (
-    <div
-      ref={mapRef}
-      className="mx-auto grid w-full min-w-[36rem] grid-cols-[1fr_auto_1fr] items-stretch gap-1"
-    >
-      {leftCount === 0 ? (
-        <div />
-      ) : (
-        <div className="flex items-start justify-end gap-1">{leftSections}</div>
-      )}
-      {aisle}
-      {rightCount === 0 ? (
-        <div />
-      ) : (
-        <div className="flex items-start justify-start gap-1">{rightSections}</div>
-      )}
+      {backRow}
     </div>
   );
 }
@@ -632,6 +657,7 @@ async function downloadEventRequestPdf(request: EventSetupRequest, occurrenceDat
     `Status: ${request.status}`,
     `Requester: ${request.requester_name} (${request.requester_email})`,
   ];
+  if (request.equipment.length) details.push(`Equipment: ${request.equipment.join(', ')}`);
   if (request.recurrence_days.length) {
     details.push(
       `Repeats weekly: ${request.recurrence_days.map((day) => WEEKDAYS[day]).join(', ')} through ${request.recurrence_end_date ?? 'not specified'}`,
@@ -662,6 +688,9 @@ async function downloadEventRequestPdf(request: EventSetupRequest, occurrenceDat
     details.push(
       `${quantityLabel}: ${request.total_seats} · ${request.seat_sections} sections · ${request.seat_rows} rows · ${request.seats_per_section_row} per section per row · placement ${request.seat_placement}`,
     );
+  }
+  if (request.seat_back_row_chairs > 0) {
+    details.push(`Back row away from stage: ${request.seat_back_row_chairs} chairs`);
   }
   if (request.round_table_count) {
     details.push(
@@ -883,6 +912,17 @@ async function downloadEventRequestPdf(request: EventSetupRequest, occurrenceDat
     );
     pdf.setFontSize(5);
     pdf.text('AISLE', centerX, seatsTop + 4, { align: 'center' });
+    if (request.seat_back_row_chairs > 0) {
+      const sideRowHeight = Math.min(3.5, (availableBottom - seatsTop - 12) / Math.max(rows, 1));
+      const backRowWidth = Math.min(roomWidth * 0.47, request.seat_back_row_chairs * 2 + 12);
+      drawSeatBlock(
+        'BACK ROW · AWAY FROM STAGE',
+        centerX - backRowWidth / 2,
+        Math.min(seatsTop + rows * sideRowHeight + 16, availableBottom - 12),
+        1,
+        request.seat_back_row_chairs,
+      );
+    }
   } else if (request.setup_type === 'exam') {
     const frontCount = request.exam_front_rows ?? 0;
     const frontColumns = request.exam_front_columns ?? 0;
@@ -910,6 +950,7 @@ export default function EventSetup() {
   const queryClient = useQueryClient();
   const canManage = role === 'fac_tech' || isManager;
   const [eventTitle, setEventTitle] = useState('');
+  const [selectedPreset, setSelectedPreset] = useState('');
   const [setupType, setSetupType] = useState<SetupType>('event');
   const [eventDate, setEventDate] = useState('');
   const [setupTime, setSetupTime] = useState('');
@@ -921,9 +962,11 @@ export default function EventSetup() {
   const [seatRows, setSeatRows] = useState('');
   const [seatSections, setSeatSections] = useState('');
   const [seatsPerRow, setSeatsPerRow] = useState('');
+  const [seatBackRowChairs, setSeatBackRowChairs] = useState('0');
   const [seatPlacement, setSeatPlacement] = useState<'left' | 'right' | 'center'>('center');
   const [seatSectionOffsets, setSeatSectionOffsets] = useState<Record<string, number>>({});
   const [eventChairsRequired, setEventChairsRequired] = useState(false);
+  const [equipment, setEquipment] = useState<EventSetupEquipment[]>([]);
   const [layoutElementPositions, setLayoutElementPositions] = useState<
     Record<string, LayoutPosition>
   >({});
@@ -979,8 +1022,13 @@ export default function EventSetup() {
     const sections = numeric(seatSections);
     const perRow = numeric(seatsPerRow);
     if (rows < 1 || sections < 1 || perRow < 1) return null;
-    return { rows, sections, perRow, total: rows * sections * perRow };
-  }, [seatRows, seatSections, seatsPerRow]);
+    return {
+      rows,
+      sections,
+      perRow,
+      total: rows * sections * perRow + numeric(seatBackRowChairs),
+    };
+  }, [seatRows, seatSections, seatsPerRow, seatBackRowChairs]);
   const layoutElements = useMemo(
     () =>
       createLayoutElements(
@@ -1054,6 +1102,7 @@ export default function EventSetup() {
 
   function resetForm() {
     setEventTitle('');
+    setSelectedPreset('');
     setEventDate('');
     setSetupTime('');
     setLocation('');
@@ -1064,6 +1113,7 @@ export default function EventSetup() {
     setSeatRows('');
     setSeatSections('');
     setSeatsPerRow('');
+    setSeatBackRowChairs('0');
     setSeatPlacement('center');
     setSeatSectionOffsets({});
     setLayoutElementPositions({});
@@ -1081,6 +1131,37 @@ export default function EventSetup() {
     setSpecificDates(['']);
     setFastTurnaround(false);
     setSpecialInstructions('');
+    setEquipment([]);
+  }
+
+  function applyPreset(preset: string) {
+    setSelectedPreset(preset);
+    if (preset !== 'primary-assembly') return;
+    setEventTitle('Primary Assembly');
+    setSetupType('assembly');
+    setLocation('PPMH');
+    setSeatSections('2');
+    setSeatRows('16');
+    setSeatsPerRow('1');
+    setSeatBackRowChairs('25');
+    setSeatPlacement('center');
+    setSeatSectionOffsets({});
+    setLayoutElementPositions({});
+    setTableCount('0');
+    setTableType('round');
+    setChairsPerTable('0');
+    setTablesOnStage(false);
+    setRisersRequired(false);
+    setRiserRows('');
+    setPodiumRequired(false);
+    setRepeatEnabled(false);
+    setRepeatMode('weekly');
+    setRepeatDays([]);
+    setRepeatEndDate('');
+    setSpecificDates(['']);
+    setFastTurnaround(false);
+    setSpecialInstructions('');
+    setEquipment(['Laptop', 'Screen']);
   }
 
   async function submitRequest(event: React.FormEvent<HTMLFormElement>) {
@@ -1125,6 +1206,10 @@ export default function EventSetup() {
           ? 'Enter a chair layout of no more than 2,000 chairs.'
           : 'Enter rows, sections, and seats per row for a layout of no more than 2,000 seats.',
       );
+      return;
+    }
+    if (numeric(seatBackRowChairs) < 0 || numeric(seatBackRowChairs) > 100) {
+      setError('The additional back row must contain between 0 and 100 chairs.');
       return;
     }
     if (repeatEnabled && repeatMode === 'weekly' && repeatDays.length === 0) {
@@ -1179,6 +1264,8 @@ export default function EventSetup() {
         seat_rows: needsSeatLayout ? seatingLayout?.rows : null,
         seat_sections: needsSeatLayout ? seatingLayout?.sections : null,
         seats_per_section_row: needsSeatLayout ? seatingLayout?.perRow : null,
+        seat_back_row_chairs: needsSeatLayout ? numeric(seatBackRowChairs) : 0,
+        equipment,
         seat_placement:
           seatingLayout?.sections !== undefined && seatingLayout.sections <= 2
             ? seatPlacement
@@ -1286,6 +1373,21 @@ export default function EventSetup() {
           </p>
         </div>
 
+        <div className="max-w-sm">
+          <label htmlFor="event-setup-preset" className="field-label">
+            Start from a preset
+          </label>
+          <select
+            id="event-setup-preset"
+            value={selectedPreset}
+            onChange={(event) => applyPreset(event.target.value)}
+            className="field-select"
+          >
+            <option value="">Choose a preset…</option>
+            <option value="primary-assembly">Primary Assembly</option>
+          </select>
+        </div>
+
         <div className="grid grid-cols-1 gap-x-3 gap-y-2 sm:grid-cols-2 lg:grid-cols-4">
           <div className="sm:col-span-2">
             <label htmlFor="event-title" className="field-label">
@@ -1368,6 +1470,28 @@ export default function EventSetup() {
             />
           </div>
         </div>
+
+        <fieldset className="flex flex-wrap items-center gap-x-5 gap-y-2">
+          <legend className="w-full text-sm font-semibold text-slate-800">
+            Equipment requested
+          </legend>
+          {EVENT_SETUP_EQUIPMENT.map((item) => (
+            <label key={item} className="flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={equipment.includes(item)}
+                onChange={(event) =>
+                  setEquipment((current) =>
+                    event.target.checked
+                      ? [...current, item]
+                      : current.filter((selected) => selected !== item),
+                  )
+                }
+              />
+              {item}
+            </label>
+          ))}
+        </fieldset>
 
         {setupType === 'exam' && (
           <>
@@ -1496,7 +1620,7 @@ export default function EventSetup() {
             <legend className="text-sm font-semibold text-slate-800">
               {setupType === 'assembly' ? 'Assembly seating layout' : 'Custom seat layout'}
             </legend>
-            <div className="grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-5">
               <label className="field-label">
                 Sections
                 <input
@@ -1525,6 +1649,17 @@ export default function EventSetup() {
                   max="100"
                   value={seatsPerRow}
                   onChange={(event) => setSeatsPerRow(event.target.value)}
+                  className="field mt-1"
+                />
+              </label>
+              <label className="field-label">
+                Back row chairs (away from stage)
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={seatBackRowChairs}
+                  onChange={(event) => setSeatBackRowChairs(event.target.value)}
                   className="field mt-1"
                 />
               </label>
@@ -1601,6 +1736,7 @@ export default function EventSetup() {
                       sections={seatingLayout.sections}
                       rows={seatingLayout.rows}
                       seatsPerRow={seatingLayout.perRow}
+                      backRowChairs={numeric(seatBackRowChairs)}
                       placement={seatPlacement}
                       offsets={seatSectionOffsets}
                       onOffsetsChange={setSeatSectionOffsets}
@@ -1638,7 +1774,7 @@ export default function EventSetup() {
                 </label>
                 {eventChairsRequired && (
                   <>
-                    <div className="grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-4">
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-5">
                       <label className="field-label">
                         Sections
                         <input
@@ -1666,6 +1802,17 @@ export default function EventSetup() {
                           max="100"
                           value={seatsPerRow}
                           onChange={(event) => setSeatsPerRow(event.target.value)}
+                          className="field mt-1"
+                        />
+                      </label>
+                      <label className="field-label">
+                        Back row chairs (away from stage)
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          value={seatBackRowChairs}
+                          onChange={(event) => setSeatBackRowChairs(event.target.value)}
                           className="field mt-1"
                         />
                       </label>
@@ -1829,11 +1976,14 @@ export default function EventSetup() {
                     <p className="mb-2 text-xs font-medium text-slate-700">
                       {seatingLayout.total} chairs · {seatingLayout.sections} sections ×{' '}
                       {seatingLayout.rows} rows × {seatingLayout.perRow} chairs per row
+                      {numeric(seatBackRowChairs) > 0 &&
+                        ` + ${numeric(seatBackRowChairs)} in the back row`}
                     </p>
                     <HallSeatMap
                       sections={seatingLayout.sections}
                       rows={seatingLayout.rows}
                       seatsPerRow={seatingLayout.perRow}
+                      backRowChairs={numeric(seatBackRowChairs)}
                       placement={seatPlacement}
                       offsets={seatSectionOffsets}
                       onOffsetsChange={setSeatSectionOffsets}
@@ -2095,6 +2245,11 @@ export default function EventSetup() {
                       through {selectedRequest.recurrence_end_date}
                     </p>
                   )}
+                  {selectedRequest.equipment.length > 0 && (
+                    <p className="mt-2 text-sm text-slate-700">
+                      Equipment: {selectedRequest.equipment.join(', ')}
+                    </p>
+                  )}
                   {!selectedRequest.recurrence_days.length &&
                     selectedRequest.recurrence_dates?.length > 0 && (
                       <p className="mt-1 text-sm text-slate-600">
@@ -2195,6 +2350,7 @@ export default function EventSetup() {
                         sections={selectedRequest.seat_sections}
                         rows={selectedRequest.seat_rows}
                         seatsPerRow={selectedRequest.seats_per_section_row}
+                        backRowChairs={selectedRequest.seat_back_row_chairs}
                         placement={selectedRequest.seat_placement}
                         offsets={selectedRequest.seat_section_offsets ?? {}}
                         interactive={false}

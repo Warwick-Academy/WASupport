@@ -158,7 +158,10 @@ The Event Setup calendar and request list are shown only to Facilities reviewers
 This is a request schedule and does not reserve venues or check availability.
 Assembly and custom layouts support editable seating sections, rows, and seats per
 row with a generated seat map. Event requests can optionally include the same
-sectioned chair layout. Tables can be round or long. Apply the
+sectioned chair layout. The Primary Assembly preset fills PPMH, two side sections
+of 16 rows with one chair per row, a separate back row of 25 chairs, and Laptop
+and Screen equipment. Equipment and additional back-row chairs are included in
+the request and linked Facilities ticket. Tables can be round or long. Apply the
 `20261015000001_event_setup_requests.sql` migration first, then
 `20261015000002_event_setup_seating_options.sql` and
 `20261015000003_event_setup_seat_placement.sql`, followed by
@@ -167,7 +170,9 @@ sectioned chair layout. Tables can be round or long. Apply the
 `20261016000001_event_setup_repeats_and_tickets.sql`. Apply
 `20261016000002_event_setup_unassigned_facilities_tickets.sql` afterward to
 leave automatically created Facilities tickets unassigned when no eligible
-Facilities staff member is available. Requests support weekly or
+Facilities staff member is available. Apply
+`20261026000003_event_setup_primary_assembly.sql` after the existing Event Setup
+migrations to store equipment and additional back-row chairs. Requests support weekly or
 specific-date repeats. Every request appears on the Facilities calendar and
 creates a linked Facilities ticket, assigned to an eligible Facilities staff
 member when one is available or left unassigned otherwise. Tables may be
