@@ -13,7 +13,9 @@ import {
   ROLE_DEPARTMENT,
   STATUS_BADGE,
   STATUS_LABEL,
+  TICKET_DEPARTMENTS,
   type Ticket,
+  type TicketDepartment,
   type TicketMessage,
   type TicketPriority,
   type TicketStatus,
@@ -82,13 +84,16 @@ export default function TicketDetail() {
   const totalSelectedMinutes = Number(timeHours || 0) * 60 + Number(timeMinutes);
   const selectedTimeMinutes = totalSelectedMinutes > 0 ? totalSelectedMinutes : null;
 
-  useEffect(() => () => {
-    const recognition = recognitionRef.current;
-    if (recognition) {
-      recognition.onend = null;
-      recognition.stop();
-    }
-  }, []);
+  useEffect(
+    () => () => {
+      const recognition = recognitionRef.current;
+      if (recognition) {
+        recognition.onend = null;
+        recognition.stop();
+      }
+    },
+    [],
+  );
 
   const ticketQ = useQuery({
     queryKey: ['ticket', id],
@@ -112,13 +117,15 @@ export default function TicketDetail() {
         .eq('ticket_id', id)
         .order('created_at');
       if (error) throw error;
-      return Promise.all((data ?? []).map(async (attachment) => {
-        const { data: signed, error: signedError } = await client.storage
-          .from('attachments')
-          .createSignedUrl(attachment.storage_path, 3600);
-        if (signedError) throw signedError;
-        return { id: attachment.id, url: signed.signedUrl, message_id: attachment.message_id };
-      }));
+      return Promise.all(
+        (data ?? []).map(async (attachment) => {
+          const { data: signed, error: signedError } = await client.storage
+            .from('attachments')
+            .createSignedUrl(attachment.storage_path, 3600);
+          if (signedError) throw signedError;
+          return { id: attachment.id, url: signed.signedUrl, message_id: attachment.message_id };
+        }),
+      );
     },
     enabled: !!id && !!ticketQ.data,
   });
@@ -139,21 +146,35 @@ export default function TicketDetail() {
   });
 
   const post = useMutation({
-    mutationFn: async ({ closeTicket, minutes }: { closeTicket: boolean; minutes: number | null }) => {
+    mutationFn: async ({
+      closeTicket,
+      minutes,
+    }: {
+      closeTicket: boolean;
+      minutes: number | null;
+    }) => {
       if (!supabase || !id || !user) throw new Error('not ready');
       if (replyPhotos.length > 3) throw new Error('Attach no more than 3 photos to a reply.');
       if (replyPhotos.some((photo) => photo.size > 10 * 1024 * 1024)) {
         throw new Error('Each photo must be 10 MB or smaller.');
       }
-      if (replyPhotos.some((photo) => !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(photo.type))) {
+      if (
+        replyPhotos.some(
+          (photo) => !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(photo.type),
+        )
+      ) {
         throw new Error('Use PNG, JPEG, WebP, or GIF images.');
       }
-      const { data: message, error } = await supabase.from('ticket_messages').insert({
-        ticket_id: id,
-        author_id: user.id,
-        body: reply.trim() || 'Photo attachment',
-        is_internal: internal && isTicketStaff,
-      }).select('id').single();
+      const { data: message, error } = await supabase
+        .from('ticket_messages')
+        .insert({
+          ticket_id: id,
+          author_id: user.id,
+          body: reply.trim() || 'Photo attachment',
+          is_internal: internal && isTicketStaff,
+        })
+        .select('id')
+        .single();
       if (error) throw error;
       const attachmentErrors: string[] = [];
       for (const photo of replyPhotos) {
@@ -220,7 +241,8 @@ export default function TicketDetail() {
       recognitionRef.current?.stop();
       return;
     }
-    const SpeechRecognition = (window as SpeechRecognitionWindow).SpeechRecognition ??
+    const SpeechRecognition =
+      (window as SpeechRecognitionWindow).SpeechRecognition ??
       (window as SpeechRecognitionWindow).webkitSpeechRecognition;
     if (!SpeechRecognition) {
       setVoiceError('Voice entry is not supported in this browser. Try the latest Chrome or Edge.');
@@ -235,12 +257,18 @@ export default function TicketDetail() {
     setVoiceError(null);
     recognition.onresult = (event) => {
       dictationRef.current = Array.from(event.results, (result) => result[0].transcript).join(' ');
-      setReply([replyBeforeDictationRef.current, formatDictation(dictationRef.current)].filter(Boolean).join(' '));
+      setReply(
+        [replyBeforeDictationRef.current, formatDictation(dictationRef.current)]
+          .filter(Boolean)
+          .join(' '),
+      );
     };
     recognition.onerror = (event) => {
-      setVoiceError(event.error === 'not-allowed'
-        ? 'Allow microphone access in your browser to dictate a reply.'
-        : `Voice entry stopped: ${event.error}.`);
+      setVoiceError(
+        event.error === 'not-allowed'
+          ? 'Allow microphone access in your browser to dictate a reply.'
+          : `Voice entry stopped: ${event.error}.`,
+      );
     };
     recognition.onend = () => {
       recognitionRef.current = null;
@@ -253,7 +281,9 @@ export default function TicketDetail() {
     } catch (startError) {
       recognitionRef.current = null;
       setVoiceListening(false);
-      setVoiceError(startError instanceof Error ? startError.message : 'Could not start voice entry.');
+      setVoiceError(
+        startError instanceof Error ? startError.message : 'Could not start voice entry.',
+      );
     }
   }
 
@@ -350,25 +380,28 @@ export default function TicketDetail() {
   });
 
   if (ticketQ.isLoading) return <p className="text-sm text-slate-500">Loading…</p>;
-  if (ticketQ.error)
-    return <p className="alert-error">{(ticketQ.error as Error).message}</p>;
+  if (ticketQ.error) return <p className="alert-error">{(ticketQ.error as Error).message}</p>;
 
   const t = ticketQ.data!;
-  const canLogTime = role === 'admin' ||
+  const canLogTime =
+    role === 'admin' ||
     (role === 'manager' && profile?.department === t.department) ||
     (!!role && ROLE_DEPARTMENT[role] === t.department);
-  const assigneeName =
-    assigneeProfileQ.data?.full_name || assigneeProfileQ.data?.email || null;
+  const backToTickets = TICKET_DEPARTMENTS.includes(t.department as TicketDepartment)
+    ? `/tickets?view=open_dept&department=${t.department}`
+    : isTicketStaff
+      ? '/tickets?view=open_all'
+      : '/tickets?view=mine';
+  const assigneeName = assigneeProfileQ.data?.full_name || assigneeProfileQ.data?.email || null;
 
   const allStatuses: TicketStatus[] = ['open', 'in_progress', 'on_hold', 'resolved', 'closed'];
   const supportStatuses: TicketStatus[] = ['resolved', 'closed'];
-  const availableStatuses =
-    role === 'support' ? supportStatuses : isTicketStaff ? allStatuses : [];
+  const availableStatuses = role === 'support' ? supportStatuses : isTicketStaff ? allStatuses : [];
 
   return (
     <section className="space-y-6">
       <Link
-        to="/"
+        to={backToTickets}
         className="inline-flex items-center gap-1 text-sm font-medium text-brand-navy transition hover:text-brand-navy-hover"
       >
         ← Back to tickets
@@ -398,19 +431,23 @@ export default function TicketDetail() {
           <div className="mt-5">
             <h2 className="section-title mb-2">Photos</h2>
             <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-              {attachmentsQ.data.filter((attachment) => !attachment.message_id).map((attachment) => (
-                <a key={attachment.id} href={attachment.url} target="_blank" rel="noreferrer">
-                  <img
-                    src={attachment.url}
-                    alt="Ticket attachment"
-                    className="max-h-64 w-full rounded-md border border-slate-200 object-contain"
-                  />
-                </a>
-              ))}
+              {attachmentsQ.data
+                .filter((attachment) => !attachment.message_id)
+                .map((attachment) => (
+                  <a key={attachment.id} href={attachment.url} target="_blank" rel="noreferrer">
+                    <img
+                      src={attachment.url}
+                      alt="Ticket attachment"
+                      className="max-h-64 w-full rounded-md border border-slate-200 object-contain"
+                    />
+                  </a>
+                ))}
             </div>
           </div>
         )}
-        {attachmentsQ.error && <p className="mt-3 text-xs text-rose-700">Photos could not be loaded.</p>}
+        {attachmentsQ.error && (
+          <p className="mt-3 text-xs text-rose-700">Photos could not be loaded.</p>
+        )}
 
         <dl className="mt-6 grid grid-cols-2 gap-x-6 gap-y-3 border-t border-slate-100 pt-5 text-xs md:grid-cols-4">
           {t.requested_for && (
@@ -478,9 +515,7 @@ export default function TicketDetail() {
           {t.sla_due_at && t.status !== 'awaiting_triage' && (
             <div>
               <dt className="section-title">SLA due</dt>
-              <dd className="mt-1 text-slate-700">
-                {new Date(t.sla_due_at).toLocaleString()}
-              </dd>
+              <dd className="mt-1 text-slate-700">{new Date(t.sla_due_at).toLocaleString()}</dd>
             </div>
           )}
         </dl>
@@ -599,9 +634,7 @@ export default function TicketDetail() {
                 </span>
                 <span className="text-slate-500">{new Date(m.created_at).toLocaleString()}</span>
               </div>
-              <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
-                {m.body}
-              </p>
+              <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">{m.body}</p>
               {attachmentsQ.data?.some((attachment) => attachment.message_id === m.id) && (
                 <div className="mt-3 flex flex-wrap gap-3">
                   {attachmentsQ.data
@@ -679,15 +712,24 @@ export default function TicketDetail() {
               </label>
               <span className="text-xs text-slate-500">Up to 3 images, 10 MB each.</span>
             </div>
-            {voiceError && <p role="alert" className="mt-2 text-xs text-rose-700">{voiceError}</p>}
+            {voiceError && (
+              <p role="alert" className="mt-2 text-xs text-rose-700">
+                {voiceError}
+              </p>
+            )}
             {replyPhotos.length > 0 && (
               <ul className="mt-2 space-y-1 text-sm text-slate-600">
                 {replyPhotos.map((photo, index) => (
-                  <li key={`${photo.name}-${photo.lastModified}`} className="flex items-center justify-between gap-3">
+                  <li
+                    key={`${photo.name}-${photo.lastModified}`}
+                    className="flex items-center justify-between gap-3"
+                  >
                     <span className="truncate">{photo.name}</span>
                     <button
                       type="button"
-                      onClick={() => setReplyPhotos((current) => current.filter((_, i) => i !== index))}
+                      onClick={() =>
+                        setReplyPhotos((current) => current.filter((_, i) => i !== index))
+                      }
                       className="text-xs text-rose-700 hover:underline"
                     >
                       Remove
@@ -710,7 +752,9 @@ export default function TicketDetail() {
                   <option value="">Hours</option>
                   <option value="0">0 hours</option>
                   {Array.from({ length: 8 }, (_, index) => index + 1).map((hours) => (
-                    <option key={hours} value={hours}>{hours} {hours === 1 ? 'hour' : 'hours'}</option>
+                    <option key={hours} value={hours}>
+                      {hours} {hours === 1 ? 'hour' : 'hours'}
+                    </option>
                   ))}
                 </select>
               </label>
@@ -755,7 +799,11 @@ export default function TicketDetail() {
                     post.mutate({ closeTicket: true, minutes: selectedTimeMinutes });
                   }
                 }}
-                disabled={post.isPending || (!reply.trim() && replyPhotos.length === 0) || !selectedTimeMinutes}
+                disabled={
+                  post.isPending ||
+                  (!reply.trim() && replyPhotos.length === 0) ||
+                  !selectedTimeMinutes
+                }
                 className="btn-ghost"
               >
                 Reply &amp; close
@@ -763,7 +811,11 @@ export default function TicketDetail() {
             )}
             <button
               type="submit"
-              disabled={post.isPending || (!reply.trim() && replyPhotos.length === 0) || (canLogTime && !selectedTimeMinutes)}
+              disabled={
+                post.isPending ||
+                (!reply.trim() && replyPhotos.length === 0) ||
+                (canLogTime && !selectedTimeMinutes)
+              }
               className="btn-primary"
             >
               {post.isPending ? 'Sending…' : 'Post reply'}

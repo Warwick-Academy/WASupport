@@ -31,7 +31,13 @@ type SortKey =
   | 'opened'
   | 'duration';
 type SortDirection = 'asc' | 'desc';
-type AvRequestSummary = { id: string; requested_date: string; setup_time: string; equipment: string[]; location: string; };
+type AvRequestSummary = {
+  id: string;
+  requested_date: string;
+  setup_time: string;
+  equipment: string[];
+  location: string;
+};
 type AssigneeOption = { id: string; full_name: string | null; email: string };
 type AssignablePerson = AssigneeOption & { role: UserRole; department: Department | null };
 
@@ -40,7 +46,12 @@ const UNCATEGORIZED_PAGE_SIZE = 100;
 const TICKET_LIST_COLUMNS =
   'id,ref,legacy_ref,department,subject,status,priority,submitter_id,assignee_id,created_at,legacy_submitter_name,legacy_assignee_name';
 const ASSIGNEE_ROLES: UserRole[] = [
-  'it_tech', 'fac_tech', 'hs_officer', 'av_admin', 'manager', 'admin',
+  'it_tech',
+  'fac_tech',
+  'hs_officer',
+  'av_admin',
+  'manager',
+  'admin',
 ];
 const PRIORITY_ORDER = { low: 0, normal: 1, high: 2, critical: 3, urgent: 4 } as const;
 const STATUS_ORDER = {
@@ -94,14 +105,23 @@ export default function TicketsList() {
   const view = searchParams.get('view');
   const from = searchParams.get('from');
   const to = searchParams.get('to');
-  const dashboardView = isTicketStaff && view && ['new', 'open', 'unassigned', 'resolved'].includes(view) &&
-    from && to && /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to)
-    ? view : null;
+  const dashboardView =
+    isTicketStaff &&
+    view &&
+    ['new', 'open', 'unassigned', 'resolved'].includes(view) &&
+    from &&
+    to &&
+    /^\d{4}-\d{2}-\d{2}$/.test(from) &&
+    /^\d{4}-\d{2}-\d{2}$/.test(to)
+      ? view
+      : null;
   const [filter, setFilter] = useState<Filter>(() =>
     view && ['mine', 'all', 'open_all', 'open_dept', 'closed_dept', 'uncategorized'].includes(view)
-      ? view as Filter : isTicketStaff ? 'all' : 'mine',
+      ? (view as Filter)
+      : isTicketStaff
+        ? 'all'
+        : 'mine',
   );
-  const [selectedDepartment, setSelectedDepartment] = useState<TicketDepartment | 'all'>('all');
   const [selectedAssignee, setSelectedAssignee] = useState('all');
   const [status, setStatus] = useState<TicketStatus | 'all'>('all');
   const [search, setSearch] = useState('');
@@ -113,16 +133,29 @@ export default function TicketsList() {
     cutoff.setMonth(cutoff.getMonth() - 1);
     return dateKey(cutoff);
   }, []);
-  const dept = profile?.department && TICKET_DEPARTMENTS.includes(profile.department as TicketDepartment)
-    ? profile.department as TicketDepartment
-    : null;
+  const requestedDepartment = searchParams.get('department');
+  const initialDepartment =
+    requestedDepartment && TICKET_DEPARTMENTS.includes(requestedDepartment as TicketDepartment)
+      ? (requestedDepartment as TicketDepartment)
+      : 'all';
+  const [selectedDepartment, setSelectedDepartment] = useState<TicketDepartment | 'all'>(
+    initialDepartment,
+  );
+  const dept =
+    profile?.department && TICKET_DEPARTMENTS.includes(profile.department as TicketDepartment)
+      ? (profile.department as TicketDepartment)
+      : null;
   const filterDepartment = selectedDepartment === 'all' ? dept : selectedDepartment;
   const hasDept = !!filterDepartment;
   const ticketCountsQ = useQuery({
     queryKey: ['ticket-status-counts', user?.id],
     enabled: !!user && !!supabase,
     retry: false,
-    queryFn: async (): Promise<{ open_tickets: number; closed_tickets: number; unassigned_tickets: number }> => {
+    queryFn: async (): Promise<{
+      open_tickets: number;
+      closed_tickets: number;
+      unassigned_tickets: number;
+    }> => {
       if (!supabase) throw new Error('Supabase not configured');
       const { data, error } = await supabase
         .rpc('ticket_status_counts')
@@ -150,7 +183,13 @@ export default function TicketsList() {
   });
 
   const assignTicket = useMutation({
-    mutationFn: async ({ ticketId, assigneeId }: { ticketId: string; assigneeId: string | null }) => {
+    mutationFn: async ({
+      ticketId,
+      assigneeId,
+    }: {
+      ticketId: string;
+      assigneeId: string | null;
+    }) => {
       if (!supabase) throw new Error('Supabase not configured');
       const { error } = await supabase
         .from('tickets')
@@ -178,18 +217,39 @@ export default function TicketsList() {
     },
   });
 
-  const { data: ticketResult, isLoading, error } = useQuery({
+  const {
+    data: ticketResult,
+    isLoading,
+    error,
+  } = useQuery({
     queryKey: [
-      'tickets', filter, user?.id, dept, selectedDepartment, selectedAssignee, search, uncategorizedPage,
-      uncategorizedCutoff, status, dashboardView, from, to,
+      'tickets',
+      filter,
+      user?.id,
+      dept,
+      selectedDepartment,
+      selectedAssignee,
+      search,
+      uncategorizedPage,
+      uncategorizedCutoff,
+      status,
+      dashboardView,
+      from,
+      to,
     ],
     enabled: !!user,
     queryFn: async (): Promise<{ tickets: Ticket[]; count: number | null; hasNext: boolean }> => {
       if (!supabase) throw new Error('Supabase not configured');
       let q = dashboardView
-        ? supabase.rpc('dashboard_ticket_drilldown', {
-            metric: dashboardView, from_date: from!, to_date: to!,
-          }, { count: 'exact' })
+        ? supabase.rpc(
+            'dashboard_ticket_drilldown',
+            {
+              metric: dashboardView,
+              from_date: from!,
+              to_date: to!,
+            },
+            { count: 'exact' },
+          )
         : supabase.from('tickets').select(TICKET_LIST_COLUMNS);
 
       if (!dashboardView && filter === 'mine') {
@@ -202,14 +262,16 @@ export default function TicketsList() {
         q = q.not('status', 'in', `(${CLOSED_STATUSES.join(',')})`);
       } else if (!dashboardView && filter === 'open_dept') {
         if (!filterDepartment) return { tickets: [], count: 0, hasNext: false };
-        q = q.eq('department', filterDepartment).not('status', 'in', `(${CLOSED_STATUSES.join(',')})`);
+        q = q
+          .eq('department', filterDepartment)
+          .not('status', 'in', `(${CLOSED_STATUSES.join(',')})`);
       } else if (!dashboardView && filter === 'closed_dept') {
         if (!filterDepartment) return { tickets: [], count: 0, hasNext: false };
-        q = q.eq('department', filterDepartment).in('status', CLOSED_STATUSES as unknown as string[]);
-      } else if (!dashboardView && filter === 'uncategorized') {
         q = q
-          .is('category_id', null)
-          .gte('created_at', `${uncategorizedCutoff}T00:00:00.000Z`);
+          .eq('department', filterDepartment)
+          .in('status', CLOSED_STATUSES as unknown as string[]);
+      } else if (!dashboardView && filter === 'uncategorized') {
+        q = q.is('category_id', null).gte('created_at', `${uncategorizedCutoff}T00:00:00.000Z`);
       }
       // 'all' applies no extra filter
 
@@ -236,7 +298,7 @@ export default function TicketsList() {
       const pageRows = data ?? [];
       return {
         tickets: pageRows.slice(0, UNCATEGORIZED_PAGE_SIZE) as Ticket[],
-        count: dashboardView ? count ?? pageRows.length : null,
+        count: dashboardView ? (count ?? pageRows.length) : null,
         hasNext: pageRows.length > UNCATEGORIZED_PAGE_SIZE,
       };
     },
@@ -265,8 +327,9 @@ export default function TicketsList() {
         .from('av_requests')
         .select('id,requested_date,setup_time,equipment,location');
       if (!isAvAdmin) request = request.eq('requester_id', user.id);
-      const { data: avRequests, error: avError } = await request
-        .order('requested_date', { ascending: false });
+      const { data: avRequests, error: avError } = await request.order('requested_date', {
+        ascending: false,
+      });
       if (avError) throw avError;
       return avRequests as AvRequestSummary[];
     },
@@ -274,9 +337,7 @@ export default function TicketsList() {
 
   const userIds = Array.from(
     new Set(
-      (data ?? [])
-        .flatMap((t) => [t.submitter_id, t.assignee_id])
-        .filter((x): x is string => !!x),
+      (data ?? []).flatMap((t) => [t.submitter_id, t.assignee_id]).filter((x): x is string => !!x),
     ),
   );
 
@@ -291,7 +352,11 @@ export default function TicketsList() {
         .in('id', userIds);
       if (error) throw error;
       const map: Record<string, string> = {};
-      for (const p of (data ?? []) as Array<{ id: string; full_name: string | null; email: string }>) {
+      for (const p of (data ?? []) as Array<{
+        id: string;
+        full_name: string | null;
+        email: string;
+      }>) {
         map[p.id] = p.full_name ?? p.email;
       }
       return map;
@@ -309,15 +374,24 @@ export default function TicketsList() {
       left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' });
     const valueFor = (ticket: Ticket): string | number => {
       switch (sortKey) {
-        case 'ref': return ticket.ref;
-        case 'subject': return ticket.subject;
-        case 'department': return DEPARTMENT_LABEL[ticket.department];
-        case 'submitter': return nameFor(ticket.submitter_id, ticket.legacy_submitter_name);
-        case 'assignee': return nameFor(ticket.assignee_id, ticket.legacy_assignee_name);
-        case 'priority': return PRIORITY_ORDER[ticket.priority];
-        case 'status': return STATUS_ORDER[ticket.status];
-        case 'opened': return new Date(ticket.created_at).getTime();
-        case 'duration': return Date.now() - new Date(ticket.created_at).getTime();
+        case 'ref':
+          return ticket.ref;
+        case 'subject':
+          return ticket.subject;
+        case 'department':
+          return DEPARTMENT_LABEL[ticket.department];
+        case 'submitter':
+          return nameFor(ticket.submitter_id, ticket.legacy_submitter_name);
+        case 'assignee':
+          return nameFor(ticket.assignee_id, ticket.legacy_assignee_name);
+        case 'priority':
+          return PRIORITY_ORDER[ticket.priority];
+        case 'status':
+          return STATUS_ORDER[ticket.status];
+        case 'opened':
+          return new Date(ticket.created_at).getTime();
+        case 'duration':
+          return Date.now() - new Date(ticket.created_at).getTime();
       }
     };
     tickets.sort((left, right) => {
@@ -352,7 +426,10 @@ export default function TicketsList() {
   }) {
     const active = sortKey === column;
     return (
-      <th className={className} aria-sort={active ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}>
+      <th
+        className={className}
+        aria-sort={active ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+      >
         <button
           type="button"
           onClick={() => changeSort(column)}
@@ -376,24 +453,36 @@ export default function TicketsList() {
   const deptLabel = filterDepartment ? DEPARTMENT_LABEL[filterDepartment] : 'your department';
   const assigneesFor = (department: Department) =>
     (assignablePeopleQ.data ?? []).filter(
-      (person) => person.role === 'admin' || person.role === 'manager' || ROLE_DEPARTMENT[person.role] === department,
+      (person) =>
+        person.role === 'admin' ||
+        person.role === 'manager' ||
+        ROLE_DEPARTMENT[person.role] === department,
     );
   const canManageTicket = (ticket: Ticket) =>
     isTicketStaff &&
     (isAdmin || isManager || (role !== null && ROLE_DEPARTMENT[role] === ticket.department));
-  const filterAssignees = selectedDepartment === 'all'
-    ? dept ? assigneesFor(dept) : assignablePeopleQ.data ?? []
-    : assigneesFor(selectedDepartment);
+  const filterAssignees =
+    selectedDepartment === 'all'
+      ? dept
+        ? assigneesFor(dept)
+        : (assignablePeopleQ.data ?? [])
+      : assigneesFor(selectedDepartment);
 
   return (
     <section>
       <div className="page-header">
         <div>
           <h1 className="page-title">Tickets</h1>
-          <p className="text-sm italic text-slate-500">{dashboardView
-            ? `${({ new: 'New tickets', open: 'Open at period end', unassigned: 'Unassigned at period end', resolved: 'Closed tickets' } as Record<string, string>)[dashboardView]} from ${from} to ${to}.`
-            : FILTER_DESCRIPTIONS[filter]}</p>
-          {dashboardView && <Link to="/dashboard" className="text-sm text-brand-navy hover:underline">Back to dashboard</Link>}
+          <p className="text-sm italic text-slate-500">
+            {dashboardView
+              ? `${({ new: 'New tickets', open: 'Open at period end', unassigned: 'Unassigned at period end', resolved: 'Closed tickets' } as Record<string, string>)[dashboardView]} from ${from} to ${to}.`
+              : FILTER_DESCRIPTIONS[filter]}
+          </p>
+          {dashboardView && (
+            <Link to="/dashboard" className="text-sm text-brand-navy hover:underline">
+              Back to dashboard
+            </Link>
+          )}
         </div>
         <Link to="/new" className="btn-primary">
           + Submit a new ticket
@@ -404,21 +493,36 @@ export default function TicketsList() {
         {ticketCountsQ.error ? (
           <div className="mb-2 alert-error" role="alert">
             <p>Ticket statistics could not load: {(ticketCountsQ.error as Error).message}</p>
-            <button type="button" className="mt-1 font-semibold underline" onClick={() => void ticketCountsQ.refetch()}>
+            <button
+              type="button"
+              className="mt-1 font-semibold underline"
+              onClick={() => void ticketCountsQ.refetch()}
+            >
               Retry statistics
             </button>
           </div>
         ) : null}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          {([
-            ['Open tickets', ticketCountsQ.data?.open_tickets],
-            ['Closed tickets', ticketCountsQ.data?.closed_tickets],
-            ['Unassigned tickets', ticketCountsQ.data?.unassigned_tickets],
-          ] as const).map(([label, count]) => (
-            <div key={label} className="rounded-lg border border-slate-200 border-l-[3px] border-l-brand-navy bg-white px-4 py-3 shadow-card">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+          {(
+            [
+              ['Open tickets', ticketCountsQ.data?.open_tickets],
+              ['Closed tickets', ticketCountsQ.data?.closed_tickets],
+              ['Unassigned tickets', ticketCountsQ.data?.unassigned_tickets],
+            ] as const
+          ).map(([label, count]) => (
+            <div
+              key={label}
+              className="rounded-lg border border-slate-200 border-l-[3px] border-l-brand-navy bg-white px-4 py-3 shadow-card"
+            >
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {label}
+              </p>
               <p className="mt-1 text-3xl font-bold leading-none text-slate-900">
-                {count === undefined ? (ticketCountsQ.isError ? 'Unavailable' : 'Loading…') : Number(count).toLocaleString()}
+                {count === undefined
+                  ? ticketCountsQ.isError
+                    ? 'Unavailable'
+                    : 'Loading…'
+                  : Number(count).toLocaleString()}
               </p>
             </div>
           ))}
@@ -438,7 +542,9 @@ export default function TicketsList() {
         />
         {isTicketStaff && (
           <>
-            <label htmlFor="ticket-department-filter" className="sr-only">Department</label>
+            <label htmlFor="ticket-department-filter" className="sr-only">
+              Department
+            </label>
             <select
               id="ticket-department-filter"
               value={selectedDepartment}
@@ -447,10 +553,14 @@ export default function TicketsList() {
             >
               <option value="all">All departments</option>
               {TICKET_DEPARTMENTS.map((department) => (
-                <option key={department} value={department}>{DEPARTMENT_LABEL[department]}</option>
+                <option key={department} value={department}>
+                  {DEPARTMENT_LABEL[department]}
+                </option>
               ))}
             </select>
-            <label htmlFor="ticket-assignee-filter" className="sr-only">Assigned to</label>
+            <label htmlFor="ticket-assignee-filter" className="sr-only">
+              Assigned to
+            </label>
             <select
               id="ticket-assignee-filter"
               value={selectedAssignee}
@@ -542,8 +652,16 @@ export default function TicketsList() {
 
       {isLoading && <p className="text-sm text-slate-500">Loading tickets…</p>}
       {error && <p className="alert-error">{(error as Error).message}</p>}
-      {assignTicket.error && <p className="alert-error">Could not save assignment: {(assignTicket.error as Error).message}</p>}
-      {updatePriority.error && <p className="alert-error">Could not save priority: {(updatePriority.error as Error).message}</p>}
+      {assignTicket.error && (
+        <p className="alert-error">
+          Could not save assignment: {(assignTicket.error as Error).message}
+        </p>
+      )}
+      {updatePriority.error && (
+        <p className="alert-error">
+          Could not save priority: {(updatePriority.error as Error).message}
+        </p>
+      )}
 
       {data && data.length === 0 && (
         <div className="empty-state">
@@ -555,7 +673,11 @@ export default function TicketsList() {
               </Link>
             </>
           ) : (
-            <p>{filter === 'uncategorized' ? 'No uncategorized tickets match this search.' : 'No tickets match this filter.'}</p>
+            <p>
+              {filter === 'uncategorized'
+                ? 'No uncategorized tickets match this search.'
+                : 'No tickets match this filter.'}
+            </p>
           )}
         </div>
       )}
@@ -579,7 +701,11 @@ export default function TicketsList() {
               {sortedTickets.map((t) => {
                 return (
                   <tr key={t.id}>
-                    <td className="whitespace-nowrap"><Link to={`/tickets/${t.id}`} className="ref-link">{t.ref}</Link></td>
+                    <td className="whitespace-nowrap">
+                      <Link to={`/tickets/${t.id}`} className="ref-link">
+                        {t.ref}
+                      </Link>
+                    </td>
                     <td className="min-w-40 max-w-72 break-words text-slate-700" title={t.subject}>
                       <Link to={`/tickets/${t.id}`} className="hover:underline">
                         {t.subject}
@@ -590,7 +716,9 @@ export default function TicketsList() {
                     </td>
                     <td className="text-slate-700">
                       {isTicketStaff &&
-                      (isAdmin || isManager || (role !== null && ROLE_DEPARTMENT[role] === t.department)) ? (
+                      (isAdmin ||
+                        isManager ||
+                        (role !== null && ROLE_DEPARTMENT[role] === t.department)) ? (
                         <select
                           aria-label={`Assigned to for ${t.ref}`}
                           value={t.assignee_id ?? ''}
@@ -600,46 +728,61 @@ export default function TicketsList() {
                             (assignTicket.isPending && assignTicket.variables?.ticketId === t.id)
                           }
                           title={
-                            assignablePeopleQ.error
-                              ? 'Unable to load department members.'
-                              : ''
+                            assignablePeopleQ.error ? 'Unable to load department members.' : ''
                           }
-                          onChange={(event) => assignTicket.mutate({
-                            ticketId: t.id,
-                            assigneeId: event.target.value || null,
-                          })}
+                          onChange={(event) =>
+                            assignTicket.mutate({
+                              ticketId: t.id,
+                              assigneeId: event.target.value || null,
+                            })
+                          }
                           className="field-select-sm min-w-36 py-1 text-xs disabled:opacity-60"
                         >
                           <option value="">Unassigned</option>
-                          {t.assignee_id && !assigneesFor(t.department).some((person) => person.id === t.assignee_id) && (
-                            <option value={t.assignee_id}>{nameFor(t.assignee_id, t.legacy_assignee_name)}</option>
-                          )}
+                          {t.assignee_id &&
+                            !assigneesFor(t.department).some(
+                              (person) => person.id === t.assignee_id,
+                            ) && (
+                              <option value={t.assignee_id}>
+                                {nameFor(t.assignee_id, t.legacy_assignee_name)}
+                              </option>
+                            )}
                           {assigneesFor(t.department).map((person) => (
                             <option key={person.id} value={person.id}>
                               {person.full_name ?? person.email}
                             </option>
                           ))}
                         </select>
-                      ) : nameFor(t.assignee_id, t.legacy_assignee_name)}
+                      ) : (
+                        nameFor(t.assignee_id, t.legacy_assignee_name)
+                      )}
                     </td>
                     <td>
                       {canManageTicket(t) ? (
                         <select
                           aria-label={`Priority for ${t.ref}`}
                           value={t.priority}
-                          disabled={updatePriority.isPending && updatePriority.variables?.ticketId === t.id}
-                          onChange={(event) => updatePriority.mutate({
-                            ticketId: t.id,
-                            priority: event.target.value as TicketPriority,
-                          })}
+                          disabled={
+                            updatePriority.isPending && updatePriority.variables?.ticketId === t.id
+                          }
+                          onChange={(event) =>
+                            updatePriority.mutate({
+                              ticketId: t.id,
+                              priority: event.target.value as TicketPriority,
+                            })
+                          }
                           className="field-select-sm min-w-24 py-1 text-xs disabled:opacity-60"
                         >
                           {(Object.keys(PRIORITY_LABEL) as TicketPriority[]).map((priority) => (
-                            <option key={priority} value={priority}>{PRIORITY_LABEL[priority]}</option>
+                            <option key={priority} value={priority}>
+                              {PRIORITY_LABEL[priority]}
+                            </option>
                           ))}
                         </select>
                       ) : (
-                        <span className={PRIORITY_BADGE[t.priority]}>{PRIORITY_LABEL[t.priority]}</span>
+                        <span className={PRIORITY_BADGE[t.priority]}>
+                          {PRIORITY_LABEL[t.priority]}
+                        </span>
                       )}
                     </td>
                     <td>
@@ -659,43 +802,84 @@ export default function TicketsList() {
         </div>
       )}
 
-      {ticketResult && (ticketResult.count === null ? (data?.length ?? 0) > 0 : ticketResult.count > 0) && (
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600">
-          <span>
-            {ticketResult.count !== null
-              ? `${ticketResult.count.toLocaleString()} tickets · page ${uncategorizedPage + 1} of ${Math.ceil(ticketResult.count / UNCATEGORIZED_PAGE_SIZE).toLocaleString()}`
-              : `Showing ${uncategorizedPage * UNCATEGORIZED_PAGE_SIZE + 1}–${uncategorizedPage * UNCATEGORIZED_PAGE_SIZE + (data?.length ?? 0)} tickets${ticketResult.hasNext ? ' · more available' : ''}`}
-          </span>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setUncategorizedPage((page) => Math.max(0, page - 1))}
-              disabled={uncategorizedPage === 0}
-              className="btn-secondary px-3 py-1.5 disabled:opacity-50"
-            >
-              Previous
-            </button>
-            <button
-              type="button"
-              onClick={() => setUncategorizedPage((page) => page + 1)}
-              disabled={!ticketResult.hasNext}
-              className="btn-secondary px-3 py-1.5 disabled:opacity-50"
-            >
-              Next
-            </button>
+      {ticketResult &&
+        (ticketResult.count === null ? (data?.length ?? 0) > 0 : ticketResult.count > 0) && (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600">
+            <span>
+              {ticketResult.count !== null
+                ? `${ticketResult.count.toLocaleString()} tickets · page ${uncategorizedPage + 1} of ${Math.ceil(ticketResult.count / UNCATEGORIZED_PAGE_SIZE).toLocaleString()}`
+                : `Showing ${uncategorizedPage * UNCATEGORIZED_PAGE_SIZE + 1}–${uncategorizedPage * UNCATEGORIZED_PAGE_SIZE + (data?.length ?? 0)} tickets${ticketResult.hasNext ? ' · more available' : ''}`}
+            </span>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setUncategorizedPage((page) => Math.max(0, page - 1))}
+                disabled={uncategorizedPage === 0}
+                className="btn-secondary px-3 py-1.5 disabled:opacity-50"
+              >
+                Previous
+              </button>
+              <button
+                type="button"
+                onClick={() => setUncategorizedPage((page) => page + 1)}
+                disabled={!ticketResult.hasNext}
+                className="btn-secondary px-3 py-1.5 disabled:opacity-50"
+              >
+                Next
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {(role === 'submitter' || isAvAdmin) && <section className="mt-10">
-        <h2 className="text-lg font-semibold text-brand-navy">{isAvAdmin ? 'AV tickets' : 'My AV tickets'}</h2>
-        <div className="mt-4 data-table-wrap">
-          <table className="data-table"><thead><tr><th>Date</th><th>Setup</th><th>Location</th><th>Equipment</th><th></th></tr></thead><tbody>
-            {(avRequestsQ.data ?? []).map((request) => <tr key={request.id}><td>{request.requested_date}</td><td>{request.setup_time.slice(0, 5)}</td><td>{request.location}</td><td>{request.equipment.join(', ') || 'None'}</td><td>{request.requested_date >= new Date().toISOString().slice(0, 10) ? <Link to={`/av-request?request=${request.id}`} className="font-medium text-brand-navy hover:underline">Edit</Link> : <span className="text-xs text-slate-500">Past</span>}</td></tr>)}
-            {avRequestsQ.data?.length === 0 && <tr><td colSpan={5} className="text-center text-slate-500">No AV tickets yet.</td></tr>}
-          </tbody></table>
-        </div>
-      </section>}
+      {(role === 'submitter' || isAvAdmin) && (
+        <section className="mt-10">
+          <h2 className="text-lg font-semibold text-brand-navy">
+            {isAvAdmin ? 'AV tickets' : 'My AV tickets'}
+          </h2>
+          <div className="mt-4 data-table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Setup</th>
+                  <th>Location</th>
+                  <th>Equipment</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {(avRequestsQ.data ?? []).map((request) => (
+                  <tr key={request.id}>
+                    <td>{request.requested_date}</td>
+                    <td>{request.setup_time.slice(0, 5)}</td>
+                    <td>{request.location}</td>
+                    <td>{request.equipment.join(', ') || 'None'}</td>
+                    <td>
+                      {request.requested_date >= new Date().toISOString().slice(0, 10) ? (
+                        <Link
+                          to={`/av-request?request=${request.id}`}
+                          className="font-medium text-brand-navy hover:underline"
+                        >
+                          Edit
+                        </Link>
+                      ) : (
+                        <span className="text-xs text-slate-500">Past</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                {avRequestsQ.data?.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="text-center text-slate-500">
+                      No AV tickets yet.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
     </section>
   );
 }
