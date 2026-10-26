@@ -431,13 +431,21 @@ function HallSeatMap({
         {leftCount === 0 ? (
           <div />
         ) : (
-          <div className="flex items-start justify-end gap-1">{leftSections}</div>
+          <div
+            className={`flex items-start gap-1 ${placement === 'outside' ? 'justify-start' : 'justify-end'}`}
+          >
+            {leftSections}
+          </div>
         )}
         {aisle}
         {rightCount === 0 ? (
           <div />
         ) : (
-          <div className="flex items-start justify-start gap-1">{rightSections}</div>
+          <div
+            className={`flex items-start gap-1 ${placement === 'outside' ? 'justify-end' : 'justify-start'}`}
+          >
+            {rightSections}
+          </div>
         )}
       </div>
       {backRow}
@@ -885,11 +893,15 @@ async function downloadEventRequestPdf(request: EventSetupRequest, occurrenceDat
             : sections;
       const aisleLeft = centerX - aisleWidth / 2;
       const leftStart =
-        request.seat_placement === 'left'
-          ? centerX - aisleWidth / 2 - leftCount * perSectionWidth
-          : aisleLeft - leftCount * perSectionWidth;
+        request.seat_placement === 'outside'
+          ? mapLeft
+          : request.seat_placement === 'left'
+            ? centerX - aisleWidth / 2 - leftCount * perSectionWidth
+            : aisleLeft - leftCount * perSectionWidth;
       const rightStart =
-        request.seat_placement === 'right' ? centerX + aisleWidth / 2 : centerX + aisleWidth / 2;
+        request.seat_placement === 'outside'
+          ? mapLeft + mapWidth - perSectionWidth
+          : centerX + aisleWidth / 2;
       for (let index = 0; index < leftCount; index += 1) {
         const section = request.seat_placement === 'left' ? index + 1 : leftCount - index;
         const offset = request.seat_section_offsets?.[`Section ${section}`] ?? 0;
