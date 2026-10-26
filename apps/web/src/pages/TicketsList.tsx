@@ -19,7 +19,7 @@ import {
   type UserRole,
 } from '../lib/types';
 
-type Filter = 'mine' | 'all' | 'open_dept' | 'closed_dept' | 'uncategorized';
+type Filter = 'mine' | 'all' | 'open_all' | 'open_dept' | 'closed_dept' | 'uncategorized';
 type SortKey =
   | 'ref'
   | 'subject'
@@ -55,6 +55,7 @@ const STATUS_ORDER = {
 const FILTER_DESCRIPTIONS: Record<Filter, string> = {
   mine: 'Tickets assigned to or submitted by you.',
   all: 'Every ticket you have access to.',
+  open_all: 'Open tickets across all departments.',
   open_dept: 'Open tickets in your department.',
   closed_dept: 'Resolved and closed tickets in your department.',
   uncategorized: 'Tickets without a category.',
@@ -97,7 +98,7 @@ export default function TicketsList() {
     from && to && /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to)
     ? view : null;
   const [filter, setFilter] = useState<Filter>(() =>
-    view && ['mine', 'all', 'open_dept', 'closed_dept', 'uncategorized'].includes(view)
+    view && ['mine', 'all', 'open_all', 'open_dept', 'closed_dept', 'uncategorized'].includes(view)
       ? view as Filter : isTicketStaff ? 'all' : 'mine',
   );
   const [selectedDepartment, setSelectedDepartment] = useState<TicketDepartment | 'all'>('all');
@@ -197,6 +198,8 @@ export default function TicketsList() {
         } else if (user) {
           q = q.eq('submitter_id', user.id);
         }
+      } else if (!dashboardView && filter === 'open_all') {
+        q = q.not('status', 'in', `(${CLOSED_STATUSES.join(',')})`);
       } else if (!dashboardView && filter === 'open_dept') {
         if (!filterDepartment) return { tickets: [], count: 0, hasNext: false };
         q = q.eq('department', filterDepartment).not('status', 'in', `(${CLOSED_STATUSES.join(',')})`);
@@ -498,6 +501,13 @@ export default function TicketsList() {
           className={`${pillBase} ${!dashboardView && filter === 'all' ? pillActive : pillIdle}`}
         >
           All tickets
+        </button>
+        <button
+          type="button"
+          onClick={() => chooseFilter('open_all')}
+          className={`${pillBase} ${!dashboardView && filter === 'open_all' ? pillActive : pillIdle}`}
+        >
+          Open · All departments
         </button>
         <button
           type="button"

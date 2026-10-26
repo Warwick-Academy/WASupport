@@ -9,7 +9,27 @@ type QueuedEmail = {
     title: string;
     intro: string;
     body: string | null;
-    ticket: { id: string; ref: string; subject: string; department: string; status: string; priority: string };
+    ticket: {
+      id: string;
+      ref: string;
+      subject: string;
+      department: string;
+      status: string;
+      priority: string;
+      description?: string | null;
+      submitter_name?: string | null;
+      submitter_email?: string | null;
+      assignee_name?: string | null;
+      legacy_assignee_name?: string | null;
+      category_name?: string | null;
+      subcategory_name?: string | null;
+      requested_for?: string | null;
+      location_label?: string | null;
+      building?: string | null;
+      room?: string | null;
+      legacy_location?: string | null;
+      created_at?: string | null;
+    };
   };
 };
 
@@ -37,8 +57,44 @@ export function renderQueuedEmail(email: QueuedEmail): { html: string; text: str
   const appUrl = process.env.APP_URL || 'https://wasupportportal.netlify.app';
   const link = `${appUrl.replace(/\/$/, '')}/tickets/${encodeURIComponent(ticket.id)}`;
   const status = ticket.status.replace(/_/g, ' ');
-  const text = [title, intro, `${ticket.ref}: ${ticket.subject}`, `${ticket.department} | ${status}`, body || '', `View ticket: ${link}`, 'Reply using the ticket link; email replies are not monitored.'].join('\n\n');
-  const html = `<html><body style="font-family:Segoe UI,sans-serif;background:#f0f4f8;padding:24px;color:#1f2937"><div style="max-width:600px;margin:auto;background:white;padding:28px;border-left:3px solid #1a2744"><h1 style="font-size:20px">${escapeHtml(title)}</h1><p>${escapeHtml(intro)}</p><h2 style="font-size:16px">${escapeHtml(ticket.ref)}: ${escapeHtml(ticket.subject)}</h2><p>${escapeHtml(ticket.department)} | ${escapeHtml(status)} | Priority: ${escapeHtml(ticket.priority)}</p>${body ? `<p style="white-space:pre-wrap">${escapeHtml(body)}</p>` : ''}<a href="${escapeHtml(link)}">View ticket and reply</a><p style="font-size:12px">Reply using the ticket link; email replies are not monitored.</p></div></body></html>`;
+  const location =
+    ticket.location_label ||
+    [ticket.building, ticket.room].filter(Boolean).join(' / ') ||
+    ticket.legacy_location;
+  const category = [ticket.category_name, ticket.subcategory_name].filter(Boolean).join(' / ');
+  const details = [
+    ['Submitted by', [ticket.submitter_name, ticket.submitter_email].filter(Boolean).join(' · ')],
+    ['Department', ticket.department],
+    ['Status', status],
+    ['Priority', ticket.priority],
+    ['Category', category],
+    ['Requested for', ticket.requested_for],
+    ['Location', location],
+    ['Assigned to', ticket.assignee_name || ticket.legacy_assignee_name || 'Unassigned'],
+    ['Submitted', ticket.created_at],
+  ].filter((detail): detail is [string, string] => Boolean(detail[1]));
+  const description = ticket.description || (body === ticket.description ? body : null);
+  const update = body && body !== description ? body : null;
+  const detailText = details.map(([label, value]) => `${label}: ${value}`);
+  const text = [
+    title,
+    intro,
+    `${ticket.ref}: ${ticket.subject}`,
+    ...detailText,
+    description ? `Description:\n${description}` : '',
+    update ? `Update:\n${update}` : '',
+    `View ticket: ${link}`,
+    'Reply using the ticket link; email replies are not monitored.',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+  const detailHtml = details
+    .map(
+      ([label, value]) =>
+        `<tr><th style="padding:4px 12px 4px 0;text-align:left;vertical-align:top">${escapeHtml(label)}</th><td style="padding:4px 0">${escapeHtml(value)}</td></tr>`,
+    )
+    .join('');
+  const html = `<html><body style="font-family:Segoe UI,sans-serif;background:#f0f4f8;padding:24px;color:#1f2937"><div style="max-width:600px;margin:auto;background:white;padding:28px;border-left:3px solid #1a2744"><h1 style="font-size:20px">${escapeHtml(title)}</h1><p>${escapeHtml(intro)}</p><h2 style="font-size:16px">${escapeHtml(ticket.ref)}: ${escapeHtml(ticket.subject)}</h2><table style="font-size:14px">${detailHtml}</table>${description ? `<h3 style="font-size:15px;margin-bottom:4px">Description</h3><p style="white-space:pre-wrap;margin-top:0">${escapeHtml(description)}</p>` : ''}${update ? `<h3 style="font-size:15px;margin-bottom:4px">Update</h3><p style="white-space:pre-wrap;margin-top:0">${escapeHtml(update)}</p>` : ''}<a href="${escapeHtml(link)}">View ticket and reply</a><p style="font-size:12px">Reply using the ticket link; email replies are not monitored.</p></div></body></html>`;
   return { html, text };
 }
 

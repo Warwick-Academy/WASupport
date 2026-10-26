@@ -17,7 +17,7 @@ const OTHER_SUBCATEGORY = '__other__';
 const BUILDINGS = [
   'Primary or Secondary',
   'Reception',
-  'Barbara Hall',
+  'Barber Hall',
   'Marine Science',
   'Science Building',
   'N Building',

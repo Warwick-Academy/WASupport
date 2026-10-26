@@ -23,10 +23,21 @@ process.env.SENDGRID_FROM_EMAIL = 'sender@example.test';
 const email = {
   id: 'b4e7a3ee-b89f-4f53-a20b-bd7cc2d28f84', lease_id: 'test-lease', recipient: 'recipient@example.test', attempts: 1,
   payload: { title: 'New reply', intro: 'A reply was posted.', body: '<script>unsafe</script>',
-    ticket: { id: 'test-ticket', ref: 'IT-TEST', subject: 'Test', department: 'IT', status: 'open', priority: 'normal' } },
+    ticket: {
+      id: 'test-ticket', ref: 'IT-TEST', subject: 'Test', department: 'IT', status: 'open', priority: 'normal',
+      description: 'Camera issue', submitter_name: 'Taylor Submitter', submitter_email: 'taylor@example.test',
+      assignee_name: 'Avery Technician', category_name: 'Hardware', subcategory_name: 'Cameras',
+      requested_for: 'Maria Woods', building: 'Barber Hall', room: '12',
+      created_at: '2026-10-26T12:00:00.000Z',
+    } },
 };
 const service = load('netlify/functions/send-email.ts');
-assert.ok(service.renderQueuedEmail(email).html.includes('&lt;script&gt;'));
+const rendered = service.renderQueuedEmail(email);
+assert.ok(rendered.html.includes('&lt;script&gt;'));
+for (const detail of ['Taylor Submitter', 'taylor@example.test', 'Hardware / Cameras', 'Maria Woods', 'Barber Hall / 12', 'Avery Technician', 'Camera issue']) {
+  assert.ok(rendered.html.includes(detail), `HTML email should include ${detail}`);
+  assert.ok(rendered.text.includes(detail), `Text email should include ${detail}`);
+}
 for (const failure of [false, true]) {
   const finishes = [];
   let sentTo;

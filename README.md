@@ -183,6 +183,10 @@ rows, and podium) can be positioned in the preview;
 Facilities can review the submitted layout and download a PDF with the event
 details and layout.
 
+Ticket notification emails include the submitter and full ticket details.
+Apply `20261026000005_ticket_email_complete_details.sql` to enrich queued email
+payloads with submitter, assignment, category, and location details.
+
 Help Desk tickets now capture building and room as optional free text. Apply
 `20261016000003_clear_location_catalogue.sql` to clear the existing shared
 location catalogue; ticket location links are set to null, while existing

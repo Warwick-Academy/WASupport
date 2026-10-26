@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Camera, Mic } from 'lucide-react';
 import { supabase } from '../lib/supabase';
@@ -64,6 +64,7 @@ const PRIORITY_SLA_HINT: Record<TicketPriority, string> = {
 export default function TicketDetail() {
   const { id } = useParams<{ id: string }>();
   const { user, profile, isTicketStaff, isManager, role } = useAuth();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [reply, setReply] = useState('');
   const [replyPhotos, setReplyPhotos] = useState<File[]>([]);
@@ -191,9 +192,9 @@ export default function TicketDetail() {
             : `Reply posted, but time could not be recorded: ${timeUpdateError.message}`;
         }
       }
-      return { attachmentErrors, timeError };
+      return { attachmentErrors, timeError, closeTicket };
     },
-    onSuccess: ({ attachmentErrors, timeError }) => {
+    onSuccess: ({ attachmentErrors, timeError, closeTicket }) => {
       setReply('');
       setReplyPhotos([]);
       setInternal(false);
@@ -209,6 +210,7 @@ export default function TicketDetail() {
       queryClient.invalidateQueries({ queryKey: ['ticket', id, 'messages'] });
       queryClient.invalidateQueries({ queryKey: ['ticket', id, 'attachments'] });
       queryClient.invalidateQueries({ queryKey: ['ticket', id] });
+      if (closeTicket && !timeError) navigate('/tickets?view=open_all');
     },
     onError: (e: Error) => setError(e.message),
   });
@@ -263,8 +265,14 @@ export default function TicketDetail() {
       if (newStatus === 'closed') patch.closed_at = new Date().toISOString();
       const { error } = await supabase.from('tickets').update(patch).eq('id', id);
       if (error) throw error;
+      return newStatus;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['ticket', id] }),
+    onSuccess: (newStatus) => {
+      void queryClient.invalidateQueries({ queryKey: ['ticket', id] });
+      if (newStatus === 'closed' || newStatus === 'resolved') {
+        navigate('/tickets?view=open_all');
+      }
+    },
     onError: (e: Error) => setError(e.message),
   });
 
