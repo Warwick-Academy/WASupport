@@ -347,6 +347,21 @@ export default function TicketDetail() {
     },
   });
 
+  const submitterProfileQ = useQuery({
+    queryKey: ['profile', t0?.submitter_id],
+    enabled: !!supabase && !!t0?.submitter_id,
+    queryFn: async (): Promise<AssigneeOption | null> => {
+      if (!supabase || !t0?.submitter_id) return null;
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, full_name, email, role, department')
+        .eq('id', t0.submitter_id)
+        .maybeSingle();
+      if (error) throw error;
+      return (data ?? null) as AssigneeOption | null;
+    },
+  });
+
   const triage = useMutation({
     mutationFn: async () => {
       if (!supabase || !id || !user) throw new Error('not ready');
@@ -393,6 +408,11 @@ export default function TicketDetail() {
       ? '/tickets?view=open_all'
       : '/tickets?view=mine';
   const assigneeName = assigneeProfileQ.data?.full_name || assigneeProfileQ.data?.email || null;
+  const submitterName =
+    submitterProfileQ.data?.full_name?.trim() ||
+    submitterProfileQ.data?.email ||
+    t.legacy_submitter_name?.trim() ||
+    null;
 
   const allStatuses: TicketStatus[] = ['open', 'in_progress', 'on_hold', 'resolved', 'closed'];
   const supportStatuses: TicketStatus[] = ['resolved', 'closed'];
@@ -468,10 +488,10 @@ export default function TicketDetail() {
               </dd>
             </div>
           )}
-          {t.legacy_submitter_name && (
+          {submitterName && (
             <div>
               <dt className="section-title">Submitted by</dt>
-              <dd className="mt-1 text-slate-700">{t.legacy_submitter_name}</dd>
+              <dd className="mt-1 text-slate-700">{submitterName}</dd>
             </div>
           )}
           {t.legacy_assignee_name && (

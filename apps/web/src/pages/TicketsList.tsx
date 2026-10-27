@@ -357,7 +357,7 @@ export default function TicketsList() {
         full_name: string | null;
         email: string;
       }>) {
-        map[p.id] = p.full_name ?? p.email;
+        map[p.id] = p.full_name?.trim() || p.email;
       }
       return map;
     },
@@ -365,7 +365,7 @@ export default function TicketsList() {
 
   const nameFor = (id: string | null, fallback: string | null): string => {
     if (id && people && people[id]) return people[id];
-    return fallback ?? '—';
+    return fallback?.trim() || '—';
   };
 
   const sortedTickets = useMemo(() => {
