@@ -45,14 +45,6 @@ const CLOSED_STATUSES = ['resolved', 'closed'] as const;
 const UNCATEGORIZED_PAGE_SIZE = 100;
 const TICKET_LIST_COLUMNS =
   'id,ref,legacy_ref,department,subject,status,priority,submitter_id,assignee_id,created_at,legacy_submitter_name,legacy_assignee_name';
-const ASSIGNEE_ROLES: UserRole[] = [
-  'it_tech',
-  'fac_tech',
-  'hs_officer',
-  'av_admin',
-  'manager',
-  'admin',
-];
 const PRIORITY_ORDER = { low: 0, normal: 1, high: 2, critical: 3, urgent: 4 } as const;
 const STATUS_ORDER = {
   awaiting_triage: 0,
@@ -172,11 +164,7 @@ export default function TicketsList() {
     enabled: isTicketStaff && !!supabase,
     queryFn: async (): Promise<AssignablePerson[]> => {
       if (!supabase) return [];
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('id,full_name,email,role,department')
-        .in('role', ASSIGNEE_ROLES)
-        .order('full_name', { ascending: true });
+      const { data, error } = await supabase.rpc('assignable_staff');
       if (error) throw error;
       return (data ?? []) as AssignablePerson[];
     },
@@ -451,22 +439,9 @@ export default function TicketsList() {
   const pillDisabled = 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400';
 
   const deptLabel = filterDepartment ? DEPARTMENT_LABEL[filterDepartment] : 'your department';
-  const assigneesFor = (department: Department) =>
-    (assignablePeopleQ.data ?? []).filter(
-      (person) =>
-        person.role === 'admin' ||
-        person.role === 'manager' ||
-        ROLE_DEPARTMENT[person.role] === department,
-    );
   const canManageTicket = (ticket: Ticket) =>
     isTicketStaff &&
     (isAdmin || isManager || (role !== null && ROLE_DEPARTMENT[role] === ticket.department));
-  const filterAssignees =
-    selectedDepartment === 'all'
-      ? dept
-        ? assigneesFor(dept)
-        : (assignablePeopleQ.data ?? [])
-      : assigneesFor(selectedDepartment);
 
   return (
     <section>
@@ -573,7 +548,7 @@ export default function TicketsList() {
             >
               <option value="all">All assignees</option>
               <option value="unassigned">Unassigned</option>
-              {filterAssignees.map((assignee) => (
+              {(assignablePeopleQ.data ?? []).map((assignee) => (
                 <option key={assignee.id} value={assignee.id}>
                   {assignee.full_name ?? assignee.email}
                 </option>
@@ -740,14 +715,14 @@ export default function TicketsList() {
                         >
                           <option value="">Unassigned</option>
                           {t.assignee_id &&
-                            !assigneesFor(t.department).some(
+                            !(assignablePeopleQ.data ?? []).some(
                               (person) => person.id === t.assignee_id,
                             ) && (
                               <option value={t.assignee_id}>
                                 {nameFor(t.assignee_id, t.legacy_assignee_name)}
                               </option>
                             )}
-                          {assigneesFor(t.department).map((person) => (
+                          {(assignablePeopleQ.data ?? []).map((person) => (
                             <option key={person.id} value={person.id}>
                               {person.full_name ?? person.email}
                             </option>

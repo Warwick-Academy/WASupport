@@ -326,11 +326,7 @@ export default function Dashboard() {
     enabled: isTicketStaff && !!supabase,
     queryFn: async (): Promise<Array<LatestProfile & { role: string; department: Department | null }>> => {
       if (!supabase) return [];
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('id,full_name,email,role,department')
-        .in('role', ['it_tech', 'fac_tech', 'hs_officer', 'manager', 'admin'])
-        .order('full_name');
+      const { data, error } = await supabase.rpc('assignable_staff');
       if (error) throw error;
       return (data ?? []) as Array<LatestProfile & { role: string; department: Department | null }>;
     },
@@ -350,10 +346,6 @@ export default function Dashboard() {
 
   const personName = (id: string | null, fallback: string | null) =>
     (id && latestPeopleQ.data?.[id]) || fallback || '—';
-  const assigneesForDepartment = (department: Department) =>
-    (latestAssigneesQ.data ?? []).filter((person) =>
-      person.role === 'admin' || person.role === 'manager' || ROLE_DEPARTMENT[person.role as keyof typeof ROLE_DEPARTMENT] === department,
-    );
   const canAssignLatest = (ticket: LatestTicket) =>
     isTicketStaff && (isAdmin || isManager || (role !== null && ROLE_DEPARTMENT[role] === ticket.department));
 
@@ -691,11 +683,18 @@ export default function Dashboard() {
                             className="field-select-sm min-w-36 py-1 text-xs disabled:opacity-60"
                           >
                             <option value="">Unassigned</option>
-                            {ticket.assignee_id && !assigneesForDepartment(ticket.department).some((person) => person.id === ticket.assignee_id) && (
-                              <option value={ticket.assignee_id}>{personName(ticket.assignee_id, ticket.legacy_assignee_name)}</option>
-                            )}
-                            {assigneesForDepartment(ticket.department).map((person) => (
-                              <option key={person.id} value={person.id}>{person.full_name ?? person.email}</option>
+                            {ticket.assignee_id &&
+                              !latestAssigneesQ.data?.some(
+                                (person) => person.id === ticket.assignee_id,
+                              ) && (
+                                <option value={ticket.assignee_id}>
+                                  {personName(ticket.assignee_id, ticket.legacy_assignee_name)}
+                                </option>
+                              )}
+                            {(latestAssigneesQ.data ?? []).map((person) => (
+                              <option key={person.id} value={person.id}>
+                                {person.full_name ?? person.email}
+                              </option>
                             ))}
                           </select>
                         ) : personName(ticket.assignee_id, ticket.legacy_assignee_name)}

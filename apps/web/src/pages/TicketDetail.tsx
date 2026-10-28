@@ -309,24 +309,11 @@ export default function TicketDetail() {
   // Eligible assignees: dept tech matching ticket dept, plus managers/admins.
   const t0 = ticketQ.data;
   const assigneesQ = useQuery({
-    queryKey: ['assignees', t0?.department],
+    queryKey: ['assignees'],
     enabled: !!supabase && !!t0 && isTicketStaff,
     queryFn: async (): Promise<AssigneeOption[]> => {
       if (!supabase || !t0) return [];
-      const deptRoleMap: Record<string, string> = {
-        IT: 'it_tech',
-        FAC: 'fac_tech',
-        AV: 'av_admin',
-        HS: 'hs_officer',
-      };
-      const techRole = deptRoleMap[t0.department];
-      const roles = ['manager', 'admin'];
-      if (techRole) roles.push(techRole);
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('id, full_name, email, role, department')
-        .in('role', roles)
-        .order('full_name', { ascending: true });
+      const { data, error } = await supabase.rpc('assignable_staff');
       if (error) throw error;
       return (data ?? []) as AssigneeOption[];
     },
