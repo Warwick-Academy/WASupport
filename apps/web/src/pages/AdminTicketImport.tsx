@@ -130,7 +130,7 @@ export default function AdminTicketImport() {
         <div>
           <h1 className="page-title">Import tickets</h1>
           <p className="text-sm italic text-slate-500">
-            Import a Spiceworks export, including Assigned To. Existing assignments are preserved; missing owners are filled when a unique department-member match is found.
+            Import a Spiceworks export, including Assigned To. Existing assignments are preserved; missing owners are filled when a unique department-member match is found. Submitters are associated by full name, including on closed historical tickets.
           </p>
         </div>
       </div>

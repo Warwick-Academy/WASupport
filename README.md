@@ -145,6 +145,20 @@ The browser can download unresolved names; the command-line importer writes an
 adjacent `.unmatched-assignees.csv` report. Gary and Josh McCullough are not treated
 as the same person without an explicit approved mapping.
 
+## Imported submitters
+
+Imported tickets are associated with submitter profiles using normalized full names
+and available legacy email addresses. Historical matching includes closed tickets.
+New submitter profiles are matched to unassociated tickets; ambiguous matches remain
+unassociated unless an administrator approves a name alias.
+
+## Ticket list visibility
+
+The ticket list offers Open and Closed views, with a department filter for all users.
+Staff can read all non-AV tickets; submitters remain limited to their own non-AV
+tickets by row-level security. AV requests continue to use their separate request
+workflow.
+
 ## Event Setup requests
 
 Submitters can choose Help Desk, AV Request, or Event Setup from the home page.
