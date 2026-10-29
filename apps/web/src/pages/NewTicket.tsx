@@ -4,8 +4,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/auth';
 import { Combobox } from '../components/Combobox';
-import { Camera, Mic, Square } from 'lucide-react';
+import { ImagePlus, Mic, Square } from 'lucide-react';
 import { parseTicketDictation } from '../lib/dictation';
+import CameraCaptureButton from '../components/CameraCaptureButton';
 import {
   DEPARTMENT_CATEGORY_ROOT,
   TICKET_DEPARTMENTS,
@@ -67,7 +68,7 @@ export default function NewTicket() {
   const [subject, setSubject] = useState('');
   const [description, setDescription] = useState('');
   const [photos, setPhotos] = useState<File[]>([]);
-  const photoInputRef = useRef<HTMLInputElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [voiceListening, setVoiceListening] = useState(false);
   const [voiceTranscript, setVoiceTranscript] = useState('');
   const [voiceError, setVoiceError] = useState<string | null>(null);
@@ -466,19 +467,23 @@ export default function NewTicket() {
 
         <div>
           <span className="field-label">Photos</span>
-          <button
-            type="button"
-            onClick={() => photoInputRef.current?.click()}
-            className="btn-primary px-4 py-2.5"
-          >
-            <Camera aria-hidden="true" size={18} />
-            Take a photo or add a picture
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <CameraCaptureButton
+              onCapture={(photo) => setPhotos((current) => [...current, photo].slice(0, 3))}
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="btn-secondary inline-flex items-center gap-2 px-4 py-2.5"
+            >
+              <ImagePlus aria-hidden="true" size={18} />
+              Choose from files
+            </button>
+          </div>
           <input
-            ref={photoInputRef}
+            ref={fileInputRef}
             type="file"
             accept="image/png,image/jpeg,image/webp,image/gif"
-            capture="environment"
             multiple
             className="sr-only"
             onChange={(event) => {

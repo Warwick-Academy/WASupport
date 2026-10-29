@@ -23,6 +23,7 @@ import VideoEdit from './pages/VideoEdit';
 import RequireStaff from './components/RequireStaff';
 import RequireAvAdmin from './components/RequireAvAdmin';
 import AdminTicketImport from './pages/AdminTicketImport';
+import AdminSubmitterMatches from './pages/AdminSubmitterMatches';
 import AvRequest from './pages/AvRequest';
 import AvAdmin from './pages/AvAdmin';
 import DepartmentReports from './pages/DepartmentReports';
@@ -66,6 +67,7 @@ export default function App() {
           <Route path="/admin/locations" element={<AdminLocations />} />
           <Route path="/admin/notifications" element={<AdminNotifications />} />
           <Route path="/admin/import" element={<AdminTicketImport />} />
+          <Route path="/admin/submitter-matches" element={<AdminSubmitterMatches />} />
           <Route path="/kb" element={<KbList />} />
           <Route path="/kb/new" element={<KbEdit />} />
           <Route path="/kb/:slug" element={<KbArticleView />} />

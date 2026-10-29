@@ -136,6 +136,11 @@ export default function AppShell() {
                 Import
               </NavLink>
             )}
+            {isAdmin && (
+              <NavLink to="/admin/submitter-matches" className={linkClass}>
+                Ticket matches
+              </NavLink>
+            )}
             {(!isManager || isAdmin) && (
               <NavLink to="/status" className={linkClass}>
                 Status

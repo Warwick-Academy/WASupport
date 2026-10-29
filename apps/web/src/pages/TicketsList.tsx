@@ -43,7 +43,7 @@ type AssignablePerson = AssigneeOption & { role: UserRole; department: Departmen
 const CLOSED_STATUSES = ['resolved', 'closed'] as const;
 const TICKET_PAGE_SIZE = 100;
 const TICKET_LIST_COLUMNS =
-  'id,ref,legacy_ref,department,subject,status,priority,submitter_id,assignee_id,created_at,legacy_submitter_name,legacy_assignee_name';
+  'id,ref,legacy_ref,department,subject,status,priority,submitter_id,assignee_id,created_at,reopened_at,legacy_submitter_name,legacy_assignee_name';
 const PRIORITY_ORDER = { low: 0, normal: 1, high: 2, critical: 3, urgent: 4 } as const;
 const STATUS_ORDER = {
   awaiting_triage: 0,
@@ -644,7 +644,11 @@ export default function TicketsList() {
                       )}
                     </td>
                     <td>
-                      <span className={STATUS_BADGE[t.status]}>{STATUS_LABEL[t.status]}</span>
+                      <span className={STATUS_BADGE[t.status]}>
+                        {isTicketStaff && t.status === 'open' && t.reopened_at
+                          ? 'ReOpened'
+                          : STATUS_LABEL[t.status]}
+                      </span>
                     </td>
                     <td className="text-xs text-slate-500">
                       {new Date(t.created_at).toLocaleString()}

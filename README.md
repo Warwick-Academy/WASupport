@@ -111,6 +111,8 @@ with exclusive leases, and retries failed sends up to six times with backoff.
 Submitter replies go to the assignee, or department managers when unassigned;
 staff replies go to the submitter. The admin-only Email Log includes searchable
 historical attempts, queue state, errors, and delivery outcomes.
+When a submitter replies to a closed ticket, it reopens with a fresh SLA window
+and sends the assignee or department managers a reopened-ticket alert.
 
 Set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SENDGRID_API_KEY`, and
 `SENDGRID_FROM_EMAIL` in Netlify's production functions scope. `APP_URL` should be
@@ -145,12 +147,15 @@ The browser can download unresolved names; the command-line importer writes an
 adjacent `.unmatched-assignees.csv` report. Gary and Josh McCullough are not treated
 as the same person without an explicit approved mapping.
 
-## Imported submitters
+## Historical submitter tickets
 
-Imported tickets are associated with submitter profiles using normalized full names
-and available legacy email addresses. Historical matching includes closed tickets.
-New submitter profiles are matched to unassociated tickets; ambiguous matches remain
-unassociated unless an administrator approves a name alias.
+Historical tickets are associated automatically when the stored submitter email
+matches a submitter account, or when the legacy submitter name uniquely matches
+the account's full name (case and repeated whitespace are normalized). Matching
+includes closed tickets, and new submitter profiles are matched to unassociated
+tickets. Ambiguous names are not assigned automatically. Admins can review and
+approve name variants under **Ticket matches**; approved variants associate
+unlinked historical tickets and apply to future imports and new submitter accounts.
 
 ## Ticket list visibility
 

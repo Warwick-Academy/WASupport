@@ -58,6 +58,7 @@ export interface Ticket {
   updated_at: string;
   resolved_at: string | null;
   closed_at: string | null;
+  reopened_at: string | null;
   triaged_at: string | null;
   triaged_by: string | null;
   sla_due_at: string | null;
@@ -112,6 +113,18 @@ export const ROLE_DEPARTMENT: Partial<Record<UserRole, Department>> = {
   av_admin: 'AV',
   hs_officer: 'HS',
 };
+
+export function isAssignableToDepartment(
+  person: { role: string; department: Department | null },
+  department: Department,
+): boolean {
+  if (person.role === 'admin') return true;
+  if (person.role === 'manager') return person.department === null || person.department === department;
+  return (
+    ['it_tech', 'fac_tech', 'av_admin', 'hs_officer'].includes(person.role) &&
+    person.department === department
+  );
+}
 
 export const PRIORITY_LABEL: Record<TicketPriority, string> = {
   low: 'Low',

@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Camera, Mic } from 'lucide-react';
+import { ImagePlus, Mic } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { formatDictation } from '../lib/dictation';
 import { useAuth } from '../lib/auth';
+import CameraCaptureButton from '../components/CameraCaptureButton';
 import SlaBadge from '../components/SlaBadge';
 import {
   DEPARTMENT_LABEL,
@@ -19,14 +20,16 @@ import {
   type TicketMessage,
   type TicketPriority,
   type TicketStatus,
+  type UserRole,
+  type Department,
 } from '../lib/types';
 
 type AssigneeOption = {
   id: string;
   full_name: string | null;
   email: string | null;
-  role: string;
-  department: string | null;
+  role: UserRole;
+  department: Department | null;
 };
 
 type TicketAttachmentView = { id: string; url: string; message_id: string | null };
@@ -65,11 +68,12 @@ const PRIORITY_SLA_HINT: Record<TicketPriority, string> = {
 
 export default function TicketDetail() {
   const { id } = useParams<{ id: string }>();
-  const { user, profile, isTicketStaff, isManager, role } = useAuth();
+  const { user, profile, isTicketStaff, isManager, isAdmin, role } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [reply, setReply] = useState('');
   const [replyPhotos, setReplyPhotos] = useState<File[]>([]);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [timeHours, setTimeHours] = useState('');
   const [timeMinutes, setTimeMinutes] = useState('0');
   const [voiceListening, setVoiceListening] = useState(false);
@@ -212,6 +216,14 @@ export default function TicketDetail() {
             ? `Reply posted, but time could not be recorded and the ticket was not closed: ${timeUpdateError.message}`
             : `Reply posted, but time could not be recorded: ${timeUpdateError.message}`;
         }
+      } else if (closeTicket) {
+        const { error: closeError } = await supabase
+          .from('tickets')
+          .update({ status: 'closed', closed_at: new Date().toISOString() })
+          .eq('id', id);
+        if (closeError) {
+          timeError = `Reply posted, but the ticket could not be closed: ${closeError.message}`;
+        }
       }
       return { attachmentErrors, timeError, closeTicket };
     },
@@ -231,9 +243,36 @@ export default function TicketDetail() {
       queryClient.invalidateQueries({ queryKey: ['ticket', id, 'messages'] });
       queryClient.invalidateQueries({ queryKey: ['ticket', id, 'attachments'] });
       queryClient.invalidateQueries({ queryKey: ['ticket', id] });
+      queryClient.invalidateQueries({ queryKey: ['tickets'] });
+      queryClient.invalidateQueries({ queryKey: ['ticket-status-counts'] });
+      queryClient.invalidateQueries({ queryKey: ['department-kpis'] });
       if (closeTicket && !timeError) navigate('/tickets?view=open_all');
     },
     onError: (e: Error) => setError(e.message),
+  });
+
+  const deleteMessage = useMutation({
+    mutationFn: async (messageId: string) => {
+      if (!supabase || !id) throw new Error('not ready');
+      const { data: attachments, error: attachmentQueryError } = await supabase
+        .from('attachments')
+        .select('storage_path')
+        .eq('message_id', messageId);
+      if (attachmentQueryError) throw attachmentQueryError;
+      if (attachments?.length) {
+        const { error: storageError } = await supabase.storage
+          .from('attachments')
+          .remove(attachments.map((attachment) => attachment.storage_path));
+        if (storageError) throw storageError;
+      }
+      const { error } = await supabase.from('ticket_messages').delete().eq('id', messageId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['ticket', id, 'messages'] });
+      void queryClient.invalidateQueries({ queryKey: ['ticket', id, 'attachments'] });
+    },
+    onError: (cause: Error) => setError(cause.message),
   });
 
   function toggleReplyDictation() {
@@ -400,6 +439,7 @@ export default function TicketDetail() {
     submitterProfileQ.data?.email ||
     t.legacy_submitter_name?.trim() ||
     null;
+  const isSubmitterReopening = t.status === 'closed' && t.submitter_id === user?.id;
 
   const allStatuses: TicketStatus[] = ['open', 'in_progress', 'on_hold', 'resolved', 'closed'];
   const supportStatuses: TicketStatus[] = ['resolved', 'closed'];
@@ -426,7 +466,11 @@ export default function TicketDetail() {
           )}
           <span className="badge-slate">{DEPARTMENT_LABEL[t.department]}</span>
           <span className={PRIORITY_BADGE[t.priority]}>{PRIORITY_LABEL[t.priority]}</span>
-          <span className={STATUS_BADGE[t.status]}>{STATUS_LABEL[t.status]}</span>
+          <span className={STATUS_BADGE[t.status]}>
+            {isTicketStaff && t.status === 'open' && t.reopened_at
+              ? 'ReOpened'
+              : STATUS_LABEL[t.status]}
+          </span>
           <SlaBadge slaDueAt={t.sla_due_at} status={t.status} />
         </div>
 
@@ -639,7 +683,30 @@ export default function TicketDetail() {
                     </span>
                   )}
                 </span>
-                <span className="text-slate-500">{new Date(m.created_at).toLocaleString()}</span>
+                <span className="flex items-center gap-3 text-slate-500">
+                  {new Date(m.created_at).toLocaleString()}
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      disabled={deleteMessage.isPending}
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            'Remove this conversation post and any attached images? This cannot be undone.',
+                          )
+                        ) {
+                          setError(null);
+                          deleteMessage.mutate(m.id);
+                        }
+                      }}
+                      className="font-medium text-rose-700 hover:underline disabled:opacity-50"
+                    >
+                      {deleteMessage.isPending && deleteMessage.variables === m.id
+                        ? 'Removing…'
+                        : 'Remove'}
+                    </button>
+                  )}
+                </span>
               </div>
               <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">{m.body}</p>
               {attachmentsQ.data?.some((attachment) => attachment.message_id === m.id) && (
@@ -681,8 +748,13 @@ export default function TicketDetail() {
         >
           <div>
             <label htmlFor="reply" className="field-label">
-              Add a reply
+              {isSubmitterReopening ? 'Add information to reopen this ticket' : 'Add a reply'}
             </label>
+            {isSubmitterReopening && (
+              <p className="mb-2 text-sm text-slate-600">
+                Posting a reply will reopen this ticket and notify the responsible department.
+              </p>
+            )}
             <textarea
               id="reply"
               rows={4}
@@ -701,22 +773,31 @@ export default function TicketDetail() {
                 <Mic aria-hidden="true" size={16} />
                 {voiceListening ? 'Stop dictation' : 'Dictate reply'}
               </button>
-              <label className="btn-secondary inline-flex cursor-pointer items-center gap-2">
-                <Camera aria-hidden="true" size={16} />
-                Take or choose photos
-                <input
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp,image/gif"
-                  capture="environment"
-                  multiple
-                  className="sr-only"
-                  onChange={(event) => {
-                    const selected = Array.from(event.target.files ?? []);
-                    setReplyPhotos((current) => [...current, ...selected].slice(0, 3));
-                    event.target.value = '';
-                  }}
-                />
-              </label>
+              <CameraCaptureButton
+                onCapture={(photo) =>
+                  setReplyPhotos((current) => [...current, photo].slice(0, 3))
+                }
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="btn-secondary inline-flex items-center gap-2"
+              >
+                <ImagePlus aria-hidden="true" size={16} />
+                Choose from files
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                multiple
+                className="sr-only"
+                onChange={(event) => {
+                  const selected = Array.from(event.target.files ?? []);
+                  setReplyPhotos((current) => [...current, ...selected].slice(0, 3));
+                  event.target.value = '';
+                }}
+              />
               <span className="text-xs text-slate-500">Up to 3 images, 10 MB each.</span>
             </div>
             {voiceError && (
@@ -808,8 +889,7 @@ export default function TicketDetail() {
                 }}
                 disabled={
                   post.isPending ||
-                  (!reply.trim() && replyPhotos.length === 0) ||
-                  !selectedTimeMinutes
+                  (!reply.trim() && replyPhotos.length === 0)
                 }
                 className="btn-ghost"
               >
@@ -820,12 +900,15 @@ export default function TicketDetail() {
               type="submit"
               disabled={
                 post.isPending ||
-                (!reply.trim() && replyPhotos.length === 0) ||
-                (canLogTime && !selectedTimeMinutes)
+                (!reply.trim() && replyPhotos.length === 0)
               }
               className="btn-primary"
             >
-              {post.isPending ? 'Sending…' : 'Post reply'}
+              {post.isPending
+                ? 'Sending…'
+                : isSubmitterReopening
+                  ? 'Reopen & post reply'
+                  : 'Post reply'}
             </button>
           </div>
         </form>
