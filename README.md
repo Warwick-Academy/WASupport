@@ -102,6 +102,92 @@ Signed SendGrid delivery callbacks additionally need
 a successful sandbox check does not prove real inbox delivery or callback setup.
 OpenAI/Twilio are future integrations, not activated by this setup command.
 
+## Ticket categories
+
+The Tickets department filter defaults to the signed-in department member's
+department (including department managers). Members can still select another
+department or **All departments**. An explicit department in a ticket link takes
+precedence; users without a helpdesk department continue to see all departments.
+
+New helpdesk tickets require a category under the selected department. Open and
+closed ticket details always display the category, and both ticket lists include
+a category column. Historical tickets without an issue category display
+**Uncategorised** until reviewed; existing imported category text is preserved.
+
+Any department member (including AV members), department manager, or administrator
+can change a ticket's category, including across departments and on closed
+tickets. Select a category on the ticket detail page and click **Save category**.
+In the ticket list, selecting an existing category saves it immediately. Selecting
+**Other** opens the ticket with **Other** selected and the new-category name field
+focused; enter the name and click **Save category** to apply it to that ticket.
+The dropdown appears above the status controls on existing tickets, including
+uncategorised imports. If categories fail to load, use **Retry categories**.
+Selecting **Other** exposes a required name field for these roles only. Saving
+adds the name to the ticket department's shared dropdown; matching names are
+reused case-insensitively and retired matches are reactivated. Submitters and
+other roles can select the existing **Other** option when submitting a ticket
+but cannot enter custom names or edit existing ticket categories.
+
+A category must be saved before resolving or closing a ticket, including through
+reply-and-close or time logging. Apply
+`supabase/migrations/20261102000001_ticket_category_selection.sql` before deploying
+the frontend changes. This migration adds the shared Other options, restricted
+category RPCs, and database validation; it does not guess categories for historical
+tickets. Historical imports and tickets created by request triggers retain their
+existing creation workflows.
+
+Run `node scripts/test-ticket-categories.mjs` for category helper tests.
+
+## Merging duplicate tickets
+
+Department managers can merge tickets in their department, and administrators
+can merge tickets within any department. Open a duplicate ticket, choose
+**Merge into another ticket**, and enter the reference of the ticket to keep.
+Both tickets must belong to the same department, and a ticket already merged
+into another cannot be selected as the destination.
+
+The duplicate is closed and linked to the destination. An internal note on the
+destination records the previous ticket number, its submitted details, its
+conversation and internal notes, and its attachment count. Original attachments
+remain available on the linked duplicate ticket. A reciprocal internal note is
+added to the duplicate. Apply
+`supabase/migrations/20261106000001_ticket_merge.sql` before deploying the
+frontend.
+
+## Transferring tickets between departments
+
+Department managers can transfer a ticket when they manage its current or
+destination department. Administrators can transfer tickets between any
+departments. On the ticket detail page, select the correct department and click
+**Transfer ticket**. The transfer is recorded as an internal note and in ticket
+status history. The ticket's old category and assignee are cleared for review
+and routing by the destination department. If the ticket is unassigned, the
+destination department's managers are notified.
+
+Apply `supabase/migrations/20261106000002_ticket_department_transfer.sql` before
+deploying the frontend.
+
+## Ticket search reports
+
+Open **Reports > Ticket search** to select a department and a category/subcategory,
+enter keywords, or combine both filters. Leave category and keywords blank to
+include every ticket in the selected department. All history and all statuses are
+included, including imported, resolved, and closed tickets; the activity report's
+date range does not apply. Every keyword must occur somewhere in the ticket
+reference (including legacy reference), subject, or description. Keywords are
+literal, case-insensitive words separated by whitespace, not query syntax.
+Retired categories remain available for historical reporting.
+
+Admins can select any ticket department; department members and managers retain
+their existing department restrictions and database access policies. Generate the
+report after changing filters. The screen previews 50 results per page, while
+**Download CSV** and **Print / Save PDF** include all matching results with ticket
+details. To create a PDF, choose **Save as PDF** in the browser's print dialog.
+CSV fields are quoted and spreadsheet formula prefixes are escaped. The existing
+**Department activity** reports and date filters remain available.
+
+Run `node scripts/test-ticket-reports.mjs` for mocked reporting and export tests.
+
 ## Ticket email delivery
 
 Database triggers enqueue creation, assignment, status-change, and public-reply emails

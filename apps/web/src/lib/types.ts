@@ -61,6 +61,7 @@ export interface Ticket {
   reopened_at: string | null;
   triaged_at: string | null;
   triaged_by: string | null;
+  merged_into_ticket_id: string | null;
   sla_due_at: string | null;
   sla_reminder_approaching_sent: boolean;
   sla_reminder_overdue_sent: boolean;

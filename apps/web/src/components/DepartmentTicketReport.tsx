@@ -5,6 +5,7 @@ import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, X
 import { Link } from 'react-router-dom';
 import { DEPARTMENT_LABEL, STATUS_LABEL, TICKET_DEPARTMENTS, type Department, type Ticket } from '../lib/types';
 import { supabase } from '../lib/supabase';
+import { downloadCsv, printReport } from '../lib/reportExport';
 
 type DepartmentFilter = Department | 'all';
 type TicketStatusFilter = 'all' | 'open' | 'closed' | 'pending';
@@ -90,11 +91,6 @@ function formatMinutes(minutes: number): string {
   return `${hours} hr ${remainingMinutes} min`;
 }
 
-function csvCell(value: string | number | boolean | null): string {
-  const text = value == null ? '' : String(value);
-  return `"${text.replace(/"/g, '""')}"`;
-}
-
 function saveCsv(rows: ReportRow[], from: string, to: string, department: DepartmentFilter) {
   const headers = [
     'Reference', 'Subject', 'Department', 'Category', 'Subcategory', 'Status', 'Priority',
@@ -116,16 +112,8 @@ function saveCsv(rows: ReportRow[], from: string, to: string, department: Depart
     ticket.time_spent_minutes,
     openedInPeriod,
     closedInPeriod,
-  ].map(csvCell).join(','));
-  const blob = new Blob([`\ufeff${[headers.map(csvCell).join(','), ...lines].join('\r\n')}`], {
-    type: 'text/csv;charset=utf-8',
-  });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = `ticket-report-${department}-${from}-to-${to}.csv`;
-  anchor.click();
-  URL.revokeObjectURL(url);
+  ]);
+  downloadCsv(`ticket-report-${department}-${from}-to-${to}.csv`, [headers, ...lines]);
 }
 
 export default function DepartmentTicketReport({
@@ -356,13 +344,6 @@ export default function DepartmentTicketReport({
     assigneeFilter === 'all' ||
     (assigneeFilter === 'unassigned' ? !ticket.assignee_id : ticket.assignee_id === assigneeFilter),
   );
-
-  function printReport() {
-    const cleanup = () => document.body.classList.remove('printing-report');
-    document.body.classList.add('printing-report');
-    window.addEventListener('afterprint', cleanup, { once: true });
-    window.print();
-  }
 
   return (
     <section className="mt-8 report-print-area">

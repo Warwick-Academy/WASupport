@@ -1,8 +1,11 @@
 import { useMemo, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/auth';
+import { canEditTicketCategory, ticketCategoryLabel } from '../lib/ticketCategories';
+import TicketCategoryEditor from '../components/TicketCategoryEditor';
+import { loadReportCategories } from '../lib/ticketSearchReport';
 import {
   DEPARTMENT_LABEL,
   PRIORITY_BADGE,
@@ -43,7 +46,7 @@ type AssignablePerson = AssigneeOption & { role: UserRole; department: Departmen
 const CLOSED_STATUSES = ['resolved', 'closed'] as const;
 const TICKET_PAGE_SIZE = 100;
 const TICKET_LIST_COLUMNS =
-  'id,ref,legacy_ref,department,subject,status,priority,submitter_id,assignee_id,created_at,reopened_at,legacy_submitter_name,legacy_assignee_name';
+  'id,ref,legacy_ref,department,category_id,subcategory_id,legacy_subcategory,subject,status,priority,submitter_id,assignee_id,created_at,reopened_at,legacy_submitter_name,legacy_assignee_name,merged_into_ticket_id';
 const PRIORITY_ORDER = { low: 0, normal: 1, high: 2, critical: 3, urgent: 4 } as const;
 const STATUS_ORDER = {
   awaiting_triage: 0,
@@ -79,8 +82,9 @@ function formatDuration(fromIso: string, toIso: string | null): string {
 }
 
 export default function TicketsList() {
-  const { user, profile, isTicketStaff, isAdmin, isManager, isAvAdmin, role } = useAuth();
+  const { user, profile, profileLoading, isTicketStaff, isAdmin, isManager, isAvAdmin, role } = useAuth();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const view = searchParams.get('view');
   const from = searchParams.get('from');
@@ -107,14 +111,16 @@ export default function TicketsList() {
   const initialDepartment =
     requestedDepartment && TICKET_DEPARTMENTS.includes(requestedDepartment as TicketDepartment)
       ? (requestedDepartment as TicketDepartment)
-      : 'all';
-  const [selectedDepartment, setSelectedDepartment] = useState<TicketDepartment | 'all'>(
+      : requestedDepartment === 'all' ? 'all' : null;
+  const [departmentOverride, setDepartmentOverride] = useState<TicketDepartment | 'all' | null>(
     initialDepartment,
   );
+  const memberDepartment = profile?.department ?? (role ? ROLE_DEPARTMENT[role] : null);
   const dept =
-    profile?.department && TICKET_DEPARTMENTS.includes(profile.department as TicketDepartment)
-      ? (profile.department as TicketDepartment)
+    memberDepartment && TICKET_DEPARTMENTS.includes(memberDepartment as TicketDepartment)
+      ? (memberDepartment as TicketDepartment)
       : null;
+  const selectedDepartment = departmentOverride ?? (isTicketStaff ? dept : null) ?? 'all';
   const ticketCountsQ = useQuery({
     queryKey: ['ticket-status-counts', user?.id],
     enabled: !!user && !!supabase,
@@ -199,7 +205,7 @@ export default function TicketsList() {
       from,
       to,
     ],
-    enabled: !!user,
+    enabled: !!user && !profileLoading,
     queryFn: async (): Promise<{ tickets: Ticket[]; count: number | null; hasNext: boolean }> => {
       if (!supabase) throw new Error('Supabase not configured');
       let q = dashboardView
@@ -245,6 +251,13 @@ export default function TicketsList() {
     },
   });
   const data = ticketResult?.tickets;
+  const categoriesQ = useQuery({
+    queryKey: ['ticket-categories', user?.id],
+    queryFn: ({ signal }) => {
+      if (!supabase) throw new Error('Supabase not configured');
+      return loadReportCategories(supabase, signal);
+    },
+  });
 
   function chooseFilter(nextFilter: Filter) {
     if (dashboardView) setSearchParams({ view: nextFilter });
@@ -253,7 +266,7 @@ export default function TicketsList() {
   }
 
   function chooseDepartment(value: TicketDepartment | 'all') {
-    setSelectedDepartment(value);
+    setDepartmentOverride(value);
     setSelectedAssignee('all');
     setTicketPage(0);
   }
@@ -390,6 +403,7 @@ export default function TicketsList() {
   const pillIdle = 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50';
   const canManageTicket = (ticket: Ticket) =>
     isTicketStaff &&
+    !ticket.merged_into_ticket_id &&
     (isAdmin || isManager || (role !== null && ROLE_DEPARTMENT[role] === ticket.department));
 
   return (
@@ -523,6 +537,7 @@ export default function TicketsList() {
 
       {isLoading && <p className="text-sm text-slate-500">Loading tickets…</p>}
       {error && <p className="alert-error">{(error as Error).message}</p>}
+      {categoriesQ.error && <p role="alert" className="alert-error">Could not load categories: {categoriesQ.error.message}</p>}
       {assignTicket.error && (
         <p className="alert-error">
           Could not save assignment: {(assignTicket.error as Error).message}
@@ -547,6 +562,7 @@ export default function TicketsList() {
               <tr>
                 <SortHeading column="ref">Ticket ID</SortHeading>
                 <SortHeading column="subject">Subject</SortHeading>
+                <th>Category</th>
                 <SortHeading column="submitter">Submitted by</SortHeading>
                 <SortHeading column="assignee">Assigned to</SortHeading>
                 <SortHeading column="priority">Priority</SortHeading>
@@ -570,10 +586,20 @@ export default function TicketsList() {
                       </Link>
                     </td>
                     <td className="max-w-44 break-words text-slate-700">
+                      {categoriesQ.isPending ? 'Loading...' : categoriesQ.error ? 'Category unavailable' :
+                        !t.merged_into_ticket_id && canEditTicketCategory(role) && categoriesQ.data ? (
+                          <TicketCategoryEditor
+                            key={`${t.id}:${t.category_id}:${t.subcategory_id}:${t.legacy_subcategory}`}
+                            ticket={t} categories={categoriesQ.data} onSaved={() => {}}
+                            onOtherSelected={() => navigate(`/tickets/${t.id}?category=other#ticket-category-editor`)}
+                          />
+                        ) : ticketCategoryLabel(t, categoriesQ.data ?? [])}
+                    </td>
+                    <td className="max-w-44 break-words text-slate-700">
                       {nameFor(t.submitter_id, t.legacy_submitter_name)}
                     </td>
                     <td className="text-slate-700">
-                      {isTicketStaff &&
+                      {!t.merged_into_ticket_id && isTicketStaff &&
                       (isAdmin ||
                         isManager ||
                         (role !== null && ROLE_DEPARTMENT[role] === t.department)) ? (
@@ -644,8 +670,10 @@ export default function TicketsList() {
                       )}
                     </td>
                     <td>
-                      <span className={STATUS_BADGE[t.status]}>
-                        {isTicketStaff && t.status === 'open' && t.reopened_at
+                      <span className={t.merged_into_ticket_id ? 'badge-slate' : STATUS_BADGE[t.status]}>
+                        {t.merged_into_ticket_id
+                          ? 'Merged'
+                          : isTicketStaff && t.status === 'open' && t.reopened_at
                           ? 'ReOpened'
                           : STATUS_LABEL[t.status]}
                       </span>

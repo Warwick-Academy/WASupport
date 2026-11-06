@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import DepartmentTicketReport from '../components/DepartmentTicketReport';
+import TicketSearchReport from '../components/TicketSearchReport';
 import { useAuth } from '../lib/auth';
 import {
   DEPARTMENT_LABEL,
@@ -29,6 +30,7 @@ function memberDepartment(
 
 export default function DepartmentReports() {
   const { role, profile, isAdmin } = useAuth();
+  const [reportView, setReportView] = useState<'activity' | 'search'>('activity');
   const [to, setTo] = useState(() => localDate(new Date()));
   const [from, setFrom] = useState(() => {
     const date = new Date();
@@ -66,6 +68,17 @@ export default function DepartmentReports() {
         </p>
       </header>
 
+      <div className="report-no-print flex flex-wrap gap-2" role="group" aria-label="Report view">
+        <button type="button" className={reportView === 'activity' ? 'btn-primary' : 'btn-ghost'}
+          aria-pressed={reportView === 'activity'} onClick={() => setReportView('activity')}>Department activity</button>
+        <button type="button" className={reportView === 'search' ? 'btn-primary' : 'btn-ghost'}
+          aria-pressed={reportView === 'search'} onClick={() => setReportView('search')}>Ticket search</button>
+      </div>
+
+      {reportView === 'search' ? (
+        <TicketSearchReport key={isAdmin ? 'admin' : fixedDepartment}
+          fixedDepartment={isAdmin ? null : fixedDepartment} />
+      ) : <>
       <div className="flex flex-wrap items-end gap-3 border-y border-slate-200 py-4">
         <label className="block">
           <span className="field-label">From</span>
@@ -91,6 +104,7 @@ export default function DepartmentReports() {
           fixedDepartment={isAdmin ? null : fixedDepartment}
         />
       )}
+      </>}
     </section>
   );
 }

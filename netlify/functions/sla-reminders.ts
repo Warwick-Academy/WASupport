@@ -229,7 +229,11 @@ async function logNotification(row: {
 }
 
 export const handler: Handler = async (_event: HandlerEvent) => {
-  const appUrl = process.env.APP_URL ?? 'http://localhost:8888';
+  const appUrl = (
+    process.env.APP_URL ||
+    process.env.URL ||
+    'https://wasupportportal.netlify.app'
+  ).replace(/\/$/, '');
   const now = Date.now();
   const approachingCutoff = new Date(now + APPROACHING_MS).toISOString();
 
@@ -271,7 +275,7 @@ export const handler: Handler = async (_event: HandlerEvent) => {
       }
 
       const tpl = renderEmail({
-        title: `SLA breached: ${t.ref}`,
+        title: `Attention required: ${t.ref}`,
         intro: 'This ticket has passed its SLA deadline. Please action it as soon as possible.',
         ticket: t,
         appUrl,
@@ -279,7 +283,7 @@ export const handler: Handler = async (_event: HandlerEvent) => {
       try {
         const r = await sendgridSend({
           to: [...recipients],
-          subject: `[${t.ref}] SLA OVERDUE — ${t.subject}`,
+          subject: `[${t.ref}] Attention required — ${t.subject}`,
           ...tpl,
         });
         await logNotification({

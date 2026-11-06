@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ImagePlus, Mic } from 'lucide-react';
 import { supabase } from '../lib/supabase';
@@ -7,6 +7,9 @@ import { formatDictation } from '../lib/dictation';
 import { useAuth } from '../lib/auth';
 import CameraCaptureButton from '../components/CameraCaptureButton';
 import SlaBadge from '../components/SlaBadge';
+import TicketCategoryEditor from '../components/TicketCategoryEditor';
+import { canEditTicketCategory, hasTicketCategory, ticketCategoryLabel } from '../lib/ticketCategories';
+import { loadReportCategories } from '../lib/ticketSearchReport';
 import {
   DEPARTMENT_LABEL,
   PRIORITY_BADGE,
@@ -33,6 +36,10 @@ type AssigneeOption = {
 };
 
 type TicketAttachmentView = { id: string; url: string; message_id: string | null };
+type MergeTarget = Pick<
+  Ticket,
+  'id' | 'ref' | 'subject' | 'department' | 'status' | 'merged_into_ticket_id'
+>;
 
 interface SpeechRecognitionResultLike {
   0: { transcript: string };
@@ -70,6 +77,8 @@ export default function TicketDetail() {
   const { id } = useParams<{ id: string }>();
   const { user, profile, isTicketStaff, isManager, isAdmin, role } = useAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialOther = searchParams.get('category') === 'other';
   const queryClient = useQueryClient();
   const [reply, setReply] = useState('');
   const [replyPhotos, setReplyPhotos] = useState<File[]>([]);
@@ -80,6 +89,11 @@ export default function TicketDetail() {
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [internal, setInternal] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
+  const [mergeReference, setMergeReference] = useState('');
+  const [mergeTarget, setMergeTarget] = useState<MergeTarget | null>(null);
+  const [departmentSelection, setDepartmentSelection] = useState<Department | ''>('');
+  const [departmentChangeMessage, setDepartmentChangeMessage] = useState<string | null>(null);
   const [triagePriority, setTriagePriority] = useState<TicketPriority>('normal');
   const [triageAssignee, setTriageAssignee] = useState<string>('');
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
@@ -108,6 +122,32 @@ export default function TicketDetail() {
       return data as Ticket;
     },
     enabled: !!id,
+  });
+  useEffect(() => {
+    setDepartmentSelection(ticketQ.data?.department ?? '');
+  }, [ticketQ.data?.department]);
+  const currentTicket = ticketQ.data;
+  const mergedTicketQ = useQuery({
+    queryKey: ['ticket', currentTicket?.merged_into_ticket_id, 'merged-into'],
+    queryFn: async (): Promise<Pick<Ticket, 'id' | 'ref' | 'subject'>> => {
+      if (!supabase || !currentTicket?.merged_into_ticket_id) throw new Error('not ready');
+      const { data, error } = await supabase
+        .from('tickets')
+        .select('id, ref, subject')
+        .eq('id', currentTicket.merged_into_ticket_id)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!currentTicket?.merged_into_ticket_id && isTicketStaff,
+  });
+
+  const categoriesQ = useQuery({
+    queryKey: ['ticket-categories', user?.id],
+    queryFn: ({ signal }) => {
+      if (!supabase) throw new Error('Supabase not configured');
+      return loadReportCategories(supabase, signal);
+    },
   });
 
   const attachmentsQ = useQuery({
@@ -158,6 +198,9 @@ export default function TicketDetail() {
       minutes: number | null;
     }) => {
       if (!supabase || !id || !user) throw new Error('not ready');
+      if (closeTicket && (!ticketQ.data || !hasTicketCategory(ticketQ.data, categoriesQ.data ?? []))) {
+        throw new Error('Save a category before closing this ticket.');
+      }
       if (replyPhotos.length > 3) throw new Error('Attach no more than 3 photos to a reply.');
       if (replyPhotos.some((photo) => photo.size > 10 * 1024 * 1024)) {
         throw new Error('Each photo must be 10 MB or smaller.');
@@ -329,6 +372,10 @@ export default function TicketDetail() {
   const updateStatus = useMutation({
     mutationFn: async (newStatus: TicketStatus) => {
       if (!supabase || !id) throw new Error('not ready');
+      if ((newStatus === 'closed' || newStatus === 'resolved') &&
+        (!ticketQ.data || !hasTicketCategory(ticketQ.data, categoriesQ.data ?? []))) {
+        throw new Error('Save a category before resolving or closing this ticket.');
+      }
       const patch: Partial<Ticket> = { status: newStatus };
       if (newStatus === 'resolved') patch.resolved_at = new Date().toISOString();
       if (newStatus === 'closed') patch.closed_at = new Date().toISOString();
@@ -420,10 +467,93 @@ export default function TicketDetail() {
     onError: (e: Error) => setError(e.message),
   });
 
+  const mergeTargetLookup = useMutation({
+    mutationFn: async (reference: string): Promise<MergeTarget> => {
+      if (!supabase || !currentTicket) throw new Error('Ticket is not ready');
+      const normalizedReference = reference.trim().toUpperCase();
+      if (!normalizedReference) throw new Error('Enter the ticket number to keep.');
+      const { data, error } = await supabase
+        .from('tickets')
+        .select('id, ref, subject, department, status, merged_into_ticket_id')
+        .eq('ref', normalizedReference)
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) throw new Error(`Ticket ${normalizedReference} was not found.`);
+      const target = data as MergeTarget;
+      if (target.id === currentTicket.id) {
+        throw new Error('Choose a different ticket to keep.');
+      }
+      if (target.department !== currentTicket.department) {
+        throw new Error('Tickets must belong to the same department.');
+      }
+      if (target.merged_into_ticket_id) {
+        throw new Error('That ticket has already been merged into another ticket.');
+      }
+      return target;
+    },
+    onSuccess: setMergeTarget,
+  });
+
+  const mergeTickets = useMutation({
+    mutationFn: async (): Promise<string> => {
+      if (!supabase || !id || !mergeTarget) throw new Error('Select a ticket to keep.');
+      const { data, error } = await supabase.rpc('merge_tickets', {
+        p_source_ticket_id: id,
+        p_target_ticket_id: mergeTarget.id,
+      });
+      if (error) throw error;
+      if (typeof data !== 'string') throw new Error('The merged ticket was not returned.');
+      return data;
+    },
+    onSuccess: (targetId) => {
+      void queryClient.invalidateQueries({ queryKey: ['tickets'] });
+      void queryClient.invalidateQueries({ queryKey: ['ticket-status-counts'] });
+      void queryClient.invalidateQueries({ queryKey: ['department-kpis'] });
+      setMergeDialogOpen(false);
+      navigate(`/tickets/${targetId}`);
+    },
+  });
+
+  const transferDepartment = useMutation({
+    mutationFn: async (department: Department) => {
+      if (!supabase || !id) throw new Error('Ticket is not ready');
+      const { data, error } = await supabase.rpc('transfer_ticket_department', {
+        p_ticket_id: id,
+        p_department: department,
+      });
+      if (error) throw error;
+      if (data !== department) throw new Error('The ticket department was not updated.');
+      return department;
+    },
+    onSuccess: (department) => {
+      setError(null);
+      setDepartmentChangeMessage(`Ticket transferred to ${DEPARTMENT_LABEL[department]}.`);
+      void queryClient.invalidateQueries({ queryKey: ['ticket', id] });
+      void queryClient.invalidateQueries({ queryKey: ['ticket', id, 'messages'] });
+      void queryClient.invalidateQueries({ queryKey: ['tickets'] });
+      void queryClient.invalidateQueries({ queryKey: ['ticket-status-counts'] });
+      void queryClient.invalidateQueries({ queryKey: ['department-kpis'] });
+    },
+  });
+
   if (ticketQ.isLoading) return <p className="text-sm text-slate-500">Loading…</p>;
   if (ticketQ.error) return <p className="alert-error">{(ticketQ.error as Error).message}</p>;
 
   const t = ticketQ.data!;
+  const isMerged = !!t.merged_into_ticket_id;
+  const canMergeTicket =
+    role === 'admin' || (role === 'manager' && profile?.department === t.department);
+  const canTransferTicket = isAdmin || (role === 'manager' && !!profile?.department);
+  const departmentOptions: Department[] = isAdmin
+    ? (Object.keys(DEPARTMENT_LABEL) as Department[])
+    : role === 'manager' && profile?.department
+      ? profile.department === t.department
+        ? [...TICKET_DEPARTMENTS]
+        : [profile.department]
+      : [];
+  const availableDepartmentOptions = departmentOptions.filter(
+    (department) => department !== t.department,
+  );
   const canLogTime =
     role === 'admin' ||
     (role === 'manager' && profile?.department === t.department) ||
@@ -439,11 +569,18 @@ export default function TicketDetail() {
     submitterProfileQ.data?.email ||
     t.legacy_submitter_name?.trim() ||
     null;
-  const isSubmitterReopening = t.status === 'closed' && t.submitter_id === user?.id;
+  const isSubmitterReopening =
+    !isMerged && t.status === 'closed' && t.submitter_id === user?.id;
 
   const allStatuses: TicketStatus[] = ['open', 'in_progress', 'on_hold', 'resolved', 'closed'];
   const supportStatuses: TicketStatus[] = ['resolved', 'closed'];
-  const availableStatuses = role === 'support' ? supportStatuses : isTicketStaff ? allStatuses : [];
+  const availableStatuses = isMerged
+    ? []
+    : role === 'support'
+      ? supportStatuses
+      : isTicketStaff
+        ? allStatuses
+        : [];
 
   return (
     <section className="space-y-6">
@@ -466,8 +603,10 @@ export default function TicketDetail() {
           )}
           <span className="badge-slate">{DEPARTMENT_LABEL[t.department]}</span>
           <span className={PRIORITY_BADGE[t.priority]}>{PRIORITY_LABEL[t.priority]}</span>
-          <span className={STATUS_BADGE[t.status]}>
-            {isTicketStaff && t.status === 'open' && t.reopened_at
+          <span className={isMerged ? 'badge-slate' : STATUS_BADGE[t.status]}>
+            {isMerged
+              ? 'Merged'
+              : isTicketStaff && t.status === 'open' && t.reopened_at
               ? 'ReOpened'
               : STATUS_LABEL[t.status]}
           </span>
@@ -475,6 +614,29 @@ export default function TicketDetail() {
         </div>
 
         <h1 className="text-2xl font-bold text-brand-navy">{t.subject}</h1>
+        {isMerged && (
+          <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+            {isTicketStaff && mergedTicketQ.data ? (
+              <p>
+                This ticket was merged into{' '}
+                <Link
+                  to={`/tickets/${mergedTicketQ.data.id}`}
+                  className="font-semibold text-brand-navy hover:underline"
+                >
+                  {mergedTicketQ.data.ref}: {mergedTicketQ.data.subject}
+                </Link>
+                .
+              </p>
+            ) : (
+              <p>This ticket was merged into another support ticket.</p>
+            )}
+            {mergedTicketQ.error && isTicketStaff && (
+              <p role="alert" className="mt-2 text-rose-700">
+                Could not load the destination ticket: {mergedTicketQ.error.message}
+              </p>
+            )}
+          </div>
+        )}
         <p className="mt-4 whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
           {t.description}
         </p>
@@ -501,6 +663,13 @@ export default function TicketDetail() {
         )}
 
         <dl className="mt-6 grid grid-cols-2 gap-x-6 gap-y-3 border-t border-slate-100 pt-5 text-xs md:grid-cols-4">
+          <div>
+            <dt className="section-title">Category</dt>
+            <dd className="mt-1 text-slate-700">
+              {categoriesQ.isPending ? 'Loading...' : categoriesQ.error ? 'Category unavailable' :
+                ticketCategoryLabel(t, categoriesQ.data ?? [])}
+            </dd>
+          </div>
           {t.requested_for && (
             <div>
               <dt className="section-title">Requested for</dt>
@@ -571,7 +740,95 @@ export default function TicketDetail() {
           )}
         </dl>
 
-        {isTicketStaff && t.status === 'awaiting_triage' && (
+        {categoriesQ.error && (
+          <div role="alert" className="mt-3 alert-error">
+            <p>Could not load categories: {categoriesQ.error.message}</p>
+            <button type="button" className="btn-secondary mt-2"
+              disabled={categoriesQ.isFetching} onClick={() => void categoriesQ.refetch()}>
+              {categoriesQ.isFetching ? 'Loading categories...' : 'Retry categories'}
+            </button>
+          </div>
+        )}
+        {!isMerged && canEditTicketCategory(role) && categoriesQ.data && (
+          <TicketCategoryEditor
+            key={`${t.id}:${t.category_id}:${t.subcategory_id}:${t.legacy_subcategory}:${initialOther}`}
+            ticket={t} categories={categoriesQ.data}
+            initialOther={initialOther}
+            onSaved={() => {
+              setError(null);
+              updateStatus.reset();
+              if (initialOther) {
+                const next = new URLSearchParams(searchParams);
+                next.delete('category');
+                setSearchParams(next, { replace: true });
+              }
+            }} />
+        )}
+        {!isMerged && !hasTicketCategory(t, categoriesQ.data ?? []) && isTicketStaff && (
+          <p className="mt-3 alert-warn">A category must be saved before this ticket can be resolved or closed.</p>
+        )}
+        {updateStatus.error && <p role="alert" className="mt-3 alert-error">{updateStatus.error.message}</p>}
+
+        {canTransferTicket && !isMerged && availableDepartmentOptions.length > 0 && (
+          <form
+            className="mt-6 border-t border-slate-100 pt-5"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!departmentSelection || departmentSelection === t.department) return;
+              setDepartmentChangeMessage(null);
+              transferDepartment.mutate(departmentSelection);
+            }}
+          >
+            <label htmlFor="ticket-department" className="field-label">
+              Department
+            </label>
+            <p className="mb-2 text-sm text-slate-600">
+              Transfer this ticket to the correct department. Its category and assignee will be
+              cleared for review by the receiving team.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                id="ticket-department"
+                className="field-select-sm"
+                value={departmentSelection}
+                onChange={(event) =>
+                  setDepartmentSelection(event.target.value as Department | '')
+                }
+                disabled={transferDepartment.isPending}
+              >
+                <option value={t.department}>{DEPARTMENT_LABEL[t.department]} (current)</option>
+                {availableDepartmentOptions.map((department) => (
+                  <option key={department} value={department}>
+                    {DEPARTMENT_LABEL[department]}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="submit"
+                className="btn-secondary"
+                disabled={
+                  transferDepartment.isPending ||
+                  !departmentSelection ||
+                  departmentSelection === t.department
+                }
+              >
+                {transferDepartment.isPending ? 'Transferring…' : 'Transfer ticket'}
+              </button>
+            </div>
+            {transferDepartment.error && (
+              <p role="alert" className="mt-2 alert-error">
+                {transferDepartment.error.message}
+              </p>
+            )}
+            {departmentChangeMessage && (
+              <p role="status" className="mt-2 text-sm text-emerald-700">
+                {departmentChangeMessage}
+              </p>
+            )}
+          </form>
+        )}
+
+        {!isMerged && isTicketStaff && t.status === 'awaiting_triage' && (
           <div className="mt-6 rounded-lg border border-rose-200 bg-rose-50 p-4">
             <div className="mb-3 flex items-center gap-2">
               <span className="badge-triage">Needs review</span>
@@ -626,7 +883,7 @@ export default function TicketDetail() {
           </div>
         )}
 
-        {isTicketStaff && t.status !== 'awaiting_triage' && (
+        {!isMerged && isTicketStaff && t.status !== 'awaiting_triage' && (
           <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-5">
             <span className="section-title mr-2">Assignee</span>
             <select
@@ -660,7 +917,130 @@ export default function TicketDetail() {
             ))}
           </div>
         )}
+        {canMergeTicket && !isMerged && (
+          <div className="mt-6 border-t border-slate-100 pt-5">
+            <p className="mb-3 text-sm text-slate-600">
+              Merge this duplicate into another ticket. Its details and conversation will be
+              preserved as an internal note on the ticket you keep.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                mergeTargetLookup.reset();
+                mergeTickets.reset();
+                setMergeReference('');
+                setMergeTarget(null);
+                setMergeDialogOpen(true);
+              }}
+              className="btn-secondary"
+            >
+              Merge into another ticket
+            </button>
+          </div>
+        )}
       </header>
+
+      {mergeDialogOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !mergeTickets.isPending) {
+              setMergeDialogOpen(false);
+            }
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="merge-ticket-title"
+            className="w-full max-w-xl space-y-4 rounded-xl bg-white p-5 shadow-xl"
+          >
+            <div>
+              <h2 id="merge-ticket-title" className="text-lg font-semibold text-brand-navy">
+                Merge {t.ref}
+              </h2>
+              <p className="mt-1 text-sm text-slate-600">
+                Choose the ticket to keep. {t.ref} will be closed, and
+                its original details and conversation will be added to that ticket as an internal
+                note. Attachments remain available on {t.ref}.
+              </p>
+            </div>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                setMergeTarget(null);
+                mergeTargetLookup.mutate(mergeReference);
+              }}
+              className="space-y-3"
+            >
+              <label htmlFor="merge-ticket-reference" className="field-label">
+                Ticket number to keep
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <input
+                  id="merge-ticket-reference"
+                  value={mergeReference}
+                  onChange={(event) => {
+                    setMergeReference(event.target.value);
+                    setMergeTarget(null);
+                    mergeTargetLookup.reset();
+                    mergeTickets.reset();
+                  }}
+                  className="field min-w-48 flex-1"
+                  placeholder="e.g. IT-44952"
+                  autoComplete="off"
+                  disabled={mergeTargetLookup.isPending}
+                />
+                <button
+                  type="submit"
+                  className="btn-secondary"
+                  disabled={mergeTargetLookup.isPending || !mergeReference.trim()}
+                >
+                  {mergeTargetLookup.isPending ? 'Searching…' : 'Find ticket'}
+                </button>
+              </div>
+              {mergeTargetLookup.error && (
+                <p role="alert" className="alert-error">
+                  {mergeTargetLookup.error.message}
+                </p>
+              )}
+            </form>
+            {mergeTarget && (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+                <p className="font-semibold text-brand-navy">
+                  {mergeTarget.ref}: {mergeTarget.subject}
+                </p>
+                <p className="mt-1 text-slate-600">
+                  {DEPARTMENT_LABEL[mergeTarget.department]} · {STATUS_LABEL[mergeTarget.status]}
+                </p>
+              </div>
+            )}
+            {mergeTickets.error && (
+              <p role="alert" className="alert-error">
+                {mergeTickets.error.message}
+              </p>
+            )}
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setMergeDialogOpen(false)}
+                className="btn-ghost"
+                disabled={mergeTickets.isPending}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => mergeTickets.mutate()}
+                className="btn-primary"
+                disabled={!mergeTarget || mergeTickets.isPending}
+              >
+                {mergeTickets.isPending ? 'Merging…' : 'Merge tickets'}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
 
       <div>
         <h2 className="section-title mb-3">Conversation</h2>
@@ -732,7 +1112,7 @@ export default function TicketDetail() {
         </ul>
       </div>
 
-      {(isTicketStaff || t.submitter_id === user?.id) && (
+      {!isMerged && (isTicketStaff || t.submitter_id === user?.id) && (
         <form
           onSubmit={(e) => {
             e.preventDefault();

@@ -7,6 +7,8 @@ import { Combobox } from '../components/Combobox';
 import { ImagePlus, Mic, Square } from 'lucide-react';
 import { parseTicketDictation } from '../lib/dictation';
 import CameraCaptureButton from '../components/CameraCaptureButton';
+import { canEditTicketCategory, categoryRoot, OTHER_CATEGORY, resolveTicketCategory } from '../lib/ticketCategories';
+import { loadReportCategories } from '../lib/ticketSearchReport';
 import {
   DEPARTMENT_CATEGORY_ROOT,
   TICKET_DEPARTMENTS,
@@ -14,9 +16,10 @@ import {
   type TicketDepartment,
 } from '../lib/types';
 
-const OTHER_SUBCATEGORY = '__other__';
+const OTHER_SUBCATEGORY = OTHER_CATEGORY;
 const BUILDINGS = [
-  'Primary or Secondary',
+  'Primary',
+  'Secondary',
   'Reception',
   'Barber Hall',
   'Marine Science',
@@ -50,18 +53,17 @@ type SpeechRecognitionWindow = Window & {
   webkitSpeechRecognition?: new () => SpeechRecognitionLike;
 };
 
-function normalizeCategoryName(name: string) {
-  return name.toLowerCase().replace(/&/g, 'and').replace(/\s+/g, ' ').trim();
-}
-
 export default function NewTicket() {
   const { user, profile, role } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
+  const canChooseSubmitter = role === 'admin' || role === 'manager';
+  const canCreateCategory = canEditTicketCategory(role);
   const [categoryId, setCategoryId] = useState<string>('');
   const [subcategoryId, setSubcategoryId] = useState<string>('');
   const [otherSubcategory, setOtherSubcategory] = useState('');
+  const [submitterId, setSubmitterId] = useState('');
   const [building, setBuilding] = useState('');
   const [otherBuilding, setOtherBuilding] = useState('');
   const [room, setRoom] = useState('');
@@ -84,29 +86,28 @@ export default function NewTicket() {
       : null;
   const canUseVoice = !!managerDepartment;
 
+  const submittersQ = useQuery({
+    queryKey: ['ticket-submitter-directory', user?.id],
+    enabled: canChooseSubmitter && !!user,
+    queryFn: async (): Promise<Array<{ id: string; label: string }>> => {
+      if (!supabase) throw new Error('Supabase not configured');
+      const { data, error } = await supabase.rpc('ticket_submitter_directory');
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
   const categoriesQ = useQuery({
     queryKey: ['categories'],
-    queryFn: async (): Promise<Category[]> => {
+    queryFn: async ({ signal }): Promise<Category[]> => {
       if (!supabase) throw new Error('Supabase not configured');
-      const { data, error } = await supabase
-        .from('categories')
-        .select('*')
-        .eq('is_active', true)
-        .order('name');
-      if (error) throw error;
-      return data as Category[];
+      return (await loadReportCategories(supabase, signal)).filter((category) => category.is_active);
     },
   });
 
   useEffect(() => {
     if (!managerDepartment || categoryId) return;
-    const root = categoriesQ.data?.find(
-      (category) =>
-        category.department === managerDepartment &&
-        category.parent_id === null &&
-        normalizeCategoryName(category.name) ===
-          normalizeCategoryName(DEPARTMENT_CATEGORY_ROOT[managerDepartment]),
-    );
+    const root = categoryRoot(categoriesQ.data ?? [], managerDepartment);
     if (root) setCategoryId(root.id);
   }, [managerDepartment, categoryId, categoriesQ.data]);
 
@@ -126,22 +127,34 @@ export default function NewTicket() {
   const submit = useMutation({
     mutationFn: async () => {
       if (!supabase || !user) throw new Error('Not ready');
+      if (canChooseSubmitter && !submitterId) throw new Error('Select a submitter.');
       const selectedCategory = categoriesQ.data?.find((category) => category.id === categoryId);
       if (!selectedCategory) throw new Error('Select a department.');
+      if (subcategoryId !== OTHER_SUBCATEGORY &&
+        !categoriesQ.data?.some((category) => category.id === subcategoryId && category.parent_id === categoryId)) {
+        throw new Error('Select a category.');
+      }
+      const selectedSubcategoryId = await resolveTicketCategory(
+        supabase, categoryId, subcategoryId, otherSubcategory, canCreateCategory,
+      );
+      if (subcategoryId === OTHER_SUBCATEGORY) {
+        void queryClient.invalidateQueries({ queryKey: ['categories'] });
+        void queryClient.invalidateQueries({ queryKey: ['ticket-categories'] });
+        void queryClient.invalidateQueries({ queryKey: ['ticket-search-report-categories'] });
+        void queryClient.invalidateQueries({ queryKey: ['admin-categories'] });
+      }
       const { data, error } = await supabase
         .from('tickets')
         .insert({
           department: selectedCategory.department as TicketDepartment,
           category_id: categoryId || null,
-          subcategory_id:
-            subcategoryId && subcategoryId !== OTHER_SUBCATEGORY ? subcategoryId : null,
-          legacy_subcategory:
-            subcategoryId === OTHER_SUBCATEGORY ? otherSubcategory.trim() || null : null,
+          subcategory_id: selectedSubcategoryId,
+          legacy_subcategory: null,
           building: building === 'Other' ? otherBuilding.trim() || null : building || null,
           room: room.trim() || null,
           subject,
           description,
-          submitter_id: user.id,
+          submitter_id: canChooseSubmitter ? submitterId : user.id,
         })
         .select('id, ref')
         .single();
@@ -184,19 +197,13 @@ export default function NewTicket() {
   });
 
   const categoryOptions = TICKET_DEPARTMENTS.flatMap((department) => {
-    const root = categoriesQ.data?.find(
-      (category) =>
-        category.department === department &&
-        category.parent_id === null &&
-        normalizeCategoryName(category.name) ===
-          normalizeCategoryName(DEPARTMENT_CATEGORY_ROOT[department]),
-    );
+    const root = categoryRoot(categoriesQ.data ?? [], department);
     return root ? [{ value: root.id, label: DEPARTMENT_CATEGORY_ROOT[department] }] : [];
   });
   const filteredSubcategories =
     categoriesQ.data?.filter(
       (category) => category.parent_id === categoryId && category.is_active,
-    ) ?? [];
+    ).filter((category) => !canCreateCategory || category.name.trim().toLowerCase() !== 'other') ?? [];
 
   function applyVoiceTranscript(transcript: string) {
     setVoiceTranscript(transcript);
@@ -324,6 +331,30 @@ export default function NewTicket() {
         }}
         className="card-pad space-y-4 !p-5 sm:!p-6"
       >
+        {canChooseSubmitter && (
+          <div>
+            <label htmlFor="submitter" className="field-label">
+              Submitter
+            </label>
+            <Combobox
+              id="submitter"
+              options={(submittersQ.data ?? []).map(({ id, label }) => ({
+                value: id,
+                label,
+              }))}
+              value={submitterId}
+              onChange={setSubmitterId}
+              placeholder="Search for a submitter..."
+              disabled={submittersQ.isLoading || !!submittersQ.error}
+            />
+            {submittersQ.error && (
+              <p role="alert" className="mt-1 text-sm text-red-700">
+                Could not load submitters: {submittersQ.error.message}
+              </p>
+            )}
+          </div>
+        )}
+
         <div className="grid grid-cols-1 gap-x-4 gap-y-3 md:grid-cols-2">
           <div>
             <label htmlFor="category" className="field-label">
@@ -344,10 +375,11 @@ export default function NewTicket() {
 
           <div>
             <label htmlFor="subcategory" className="field-label">
-              Subcategory (optional)
+              Category
             </label>
             <select
               id="subcategory"
+              required
               disabled={!categoryId}
               value={subcategoryId}
               onChange={(event) => {
@@ -356,27 +388,28 @@ export default function NewTicket() {
               }}
               className="field-select"
             >
-              <option value="">Select a subcategory</option>
+              <option value="">Select a category</option>
               {filteredSubcategories.map((category) => (
                 <option key={category.id} value={category.id}>
                   {category.name}
                 </option>
               ))}
-              {categoryId && <option value={OTHER_SUBCATEGORY}>Other</option>}
+              {categoryId && canCreateCategory && <option value={OTHER_SUBCATEGORY}>Other</option>}
             </select>
           </div>
 
-          {subcategoryId === OTHER_SUBCATEGORY && (
+          {subcategoryId === OTHER_SUBCATEGORY && canCreateCategory && (
             <div>
               <label htmlFor="other-subcategory" className="field-label">
-                Other subcategory
+                Other category
               </label>
               <input
                 id="other-subcategory"
+                required
                 maxLength={200}
                 value={otherSubcategory}
                 onChange={(event) => setOtherSubcategory(event.target.value)}
-                placeholder="Enter a subcategory"
+                placeholder="Enter a category"
                 className="field"
               />
             </div>
@@ -514,6 +547,7 @@ export default function NewTicket() {
           )}
         </div>
 
+        {categoriesQ.error && <p role="alert" className="alert-error">Could not load categories: {categoriesQ.error.message}</p>}
         {error && (
           <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
             {error}
