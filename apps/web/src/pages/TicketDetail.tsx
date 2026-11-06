@@ -611,6 +611,30 @@ export default function TicketDetail() {
               : STATUS_LABEL[t.status]}
           </span>
           <SlaBadge slaDueAt={t.sla_due_at} status={t.status} />
+          {isManager && !isMerged && (
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={!canMergeTicket}
+                onClick={() => {
+                  mergeTargetLookup.reset();
+                  mergeTickets.reset();
+                  setMergeReference('');
+                  setMergeTarget(null);
+                  setMergeDialogOpen(true);
+                }}
+                className="btn-secondary"
+                aria-describedby={!canMergeTicket ? 'merge-permission-hint' : undefined}
+              >
+                Merge ticket
+              </button>
+              {!canMergeTicket && (
+                <span id="merge-permission-hint" className="text-xs text-slate-500">
+                  Only this department's manager or an administrator can merge this ticket.
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         <h1 className="text-2xl font-bold text-brand-navy">{t.subject}</h1>
@@ -915,27 +939,6 @@ export default function TicketDetail() {
                 {STATUS_LABEL[s]}
               </button>
             ))}
-          </div>
-        )}
-        {canMergeTicket && !isMerged && (
-          <div className="mt-6 border-t border-slate-100 pt-5">
-            <p className="mb-3 text-sm text-slate-600">
-              Merge this duplicate into another ticket. Its details and conversation will be
-              preserved as an internal note on the ticket you keep.
-            </p>
-            <button
-              type="button"
-              onClick={() => {
-                mergeTargetLookup.reset();
-                mergeTickets.reset();
-                setMergeReference('');
-                setMergeTarget(null);
-                setMergeDialogOpen(true);
-              }}
-              className="btn-secondary"
-            >
-              Merge into another ticket
-            </button>
           </div>
         )}
       </header>

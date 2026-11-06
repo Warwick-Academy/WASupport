@@ -142,7 +142,10 @@ Run `node scripts/test-ticket-categories.mjs` for category helper tests.
 
 Department managers can merge tickets in their department, and administrators
 can merge tickets within any department. Open a duplicate ticket, choose
-**Merge into another ticket**, and enter the reference of the ticket to keep.
+**Merge ticket** beside the ticket number at the top of the detail page, and
+enter the reference of the ticket to keep. This action is on individual ticket
+details, not the ticket list. Managers viewing another department's ticket see
+the action disabled with an explanation of the required permissions.
 Both tickets must belong to the same department, and a ticket already merged
 into another cannot be selected as the destination.
 
