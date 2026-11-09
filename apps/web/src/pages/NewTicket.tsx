@@ -58,12 +58,15 @@ export default function NewTicket() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const canChooseSubmitter = role === 'admin' || role === 'manager';
+  const canChooseSubmitter = role !== null &&
+    ['admin', 'manager', 'it_tech', 'fac_tech', 'hs_officer', 'av_admin'].includes(role);
   const canCreateCategory = canEditTicketCategory(role);
   const [categoryId, setCategoryId] = useState<string>('');
   const [subcategoryId, setSubcategoryId] = useState<string>('');
   const [otherSubcategory, setOtherSubcategory] = useState('');
-  const [submitterId, setSubmitterId] = useState('');
+  const [submitterChoice, setSubmitterChoice] = useState<{ userId: string; value: string } | null>(null);
+  const submitterId = submitterChoice && submitterChoice.userId === user?.id
+    ? submitterChoice.value : user?.id ?? '';
   const [building, setBuilding] = useState('');
   const [otherBuilding, setOtherBuilding] = useState('');
   const [room, setRoom] = useState('');
@@ -130,6 +133,10 @@ export default function NewTicket() {
       if (canChooseSubmitter && !submitterId) throw new Error('Select a submitter.');
       const selectedCategory = categoriesQ.data?.find((category) => category.id === categoryId);
       if (!selectedCategory) throw new Error('Select a department.');
+      if (canChooseSubmitter && submitterId !== user.id && role !== 'admin' &&
+        selectedCategory.department !== profile?.department) {
+        throw new Error('You can submit a ticket for someone else only in your own department.');
+      }
       if (subcategoryId !== OTHER_SUBCATEGORY &&
         !categoriesQ.data?.some((category) => category.id === subcategoryId && category.parent_id === categoryId)) {
         throw new Error('Select a category.');
@@ -338,15 +345,24 @@ export default function NewTicket() {
             </label>
             <Combobox
               id="submitter"
-              options={(submittersQ.data ?? []).map(({ id, label }) => ({
-                value: id,
-                label,
-              }))}
+              options={[
+                ...(user && profile?.id === user.id && !(submittersQ.data ?? []).some(({ id }) => id === user.id)
+                  ? [{ value: user.id, label: `${profile.full_name?.trim() || profile.email} (${profile.email})` }]
+                  : []),
+                ...(submittersQ.data ?? []).map(({ id, label }) => ({ value: id, label })),
+              ]}
               value={submitterId}
-              onChange={setSubmitterId}
+              onChange={(value) => {
+                if (user) setSubmitterChoice({ userId: user.id, value });
+              }}
               placeholder="Search for a submitter..."
               disabled={submittersQ.isLoading || !!submittersQ.error}
             />
+            {role !== 'admin' && (
+              <p className="mt-1 text-xs text-slate-500">
+                Tickets for another submitter must be for your department.
+              </p>
+            )}
             {submittersQ.error && (
               <p role="alert" className="mt-1 text-sm text-red-700">
                 Could not load submitters: {submittersQ.error.message}

@@ -37,17 +37,21 @@ export function Combobox({
   const [highlight, setHighlight] = useState(0);
   const wrapRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const editingRef = useRef(false);
+  const selectedLabel = value ? byValue.get(value) : undefined;
 
   // Keep input text in sync if external value changes (e.g. form reset).
   useEffect(() => {
+    if (editingRef.current) {
+      editingRef.current = false;
+      return;
+    }
     if (!value) {
       setQuery('');
-    } else {
-      const lbl = byValue.get(value);
-      if (lbl && lbl !== query) setQuery(lbl);
+    } else if (selectedLabel) {
+      setQuery(selectedLabel);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
+  }, [value, selectedLabel]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -119,7 +123,10 @@ export function Combobox({
           setOpen(true);
           setHighlight(0);
           // Clear selection if user is editing away from current label.
-          if (value && e.target.value !== byValue.get(value)) onChange('');
+          if (value && e.target.value !== byValue.get(value)) {
+            editingRef.current = true;
+            onChange('');
+          }
         }}
         onKeyDown={onKeyDown}
         className="field pr-9"

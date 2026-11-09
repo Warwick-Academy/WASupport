@@ -138,6 +138,28 @@ existing creation workflows.
 
 Run `node scripts/test-ticket-categories.mjs` for category helper tests.
 
+## Ticket submitters
+
+The new-ticket submitter picker defaults to the signed-in user and lets department
+staff and administrators select another submitter. It lists ordinary submitters
+and the signed-in user. Department members can also see managers and
+administrators assigned to their own department; administrators can see all
+managers and administrators, including those without a department. Other
+department staff are not listed, except for the signed-in user.
+
+Administrators can submit on behalf of someone else in any helpdesk department.
+Other department staff can do so only in their own department. AV tickets use
+the separate AV request workflow, so AV members can use this form for themselves
+but cannot submit a helpdesk ticket on someone else's behalf.
+
+Apply `supabase/migrations/20261109000001_ticket_submitter_directory_staff.sql`
+before deploying the frontend. Run `node scripts/test-ticket-submitter-picker.mjs`
+for the picker regression tests.
+With a disposable local Supabase database running and migrations applied, run
+`psql "<local database connection string>" -v ON_ERROR_STOP=1 -f supabase/tests/ticket_submitter_directory.sql`
+to check directory visibility and ticket insert permissions. Do not run that test
+against the shared cloud database.
+
 ## Merging duplicate tickets
 
 Department managers can merge tickets in their department, and administrators
