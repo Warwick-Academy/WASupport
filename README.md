@@ -282,7 +282,7 @@ Event Setup requests support Exam desk rows and columns, round tables, and custo
 seat layouts with a generated section/row preview. Requests can include tables on
 stage, riser rows, weekly repeat days, special instructions, and a fast-turnaround
 flag. Facilities technicians, managers, and admins can review requests and update
-their status.
+their status or edit an existing request from its calendar details.
 
 The Event Setup calendar and request list are shown only to Facilities reviewers.
 This is a request schedule and does not reserve venues or check availability.
@@ -312,6 +312,9 @@ requested with zero chairs. Sections and additional elements (tables, riser
 rows, and podium) can be positioned in the preview;
 Facilities can review the submitted layout and download a PDF with the event
 details and layout.
+
+AV admins and admins can edit recurring AV schedules in AV Admin. Changes are
+also synchronized to the associated Microsoft calendar event when one exists.
 
 Ticket notification emails include the submitter and full ticket details.
 Apply `20261026000005_ticket_email_complete_details.sql` to enrich queued email

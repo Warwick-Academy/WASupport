@@ -17,6 +17,7 @@ type RecurringEvent = {
   setup_time: string;
   location: string;
   is_active: boolean;
+  calendar_event_id: string | null;
 };
 
 function localDate() {
@@ -35,6 +36,7 @@ export default function AvRecurringAdmin() {
   const [endDate, setEndDate] = useState('');
   const [setupTime, setSetupTime] = useState('');
   const [location, setLocation] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -45,14 +47,14 @@ export default function AvRecurringAdmin() {
       if (!supabase) throw new Error('Supabase not configured');
       const { data, error } = await supabase
         .from('av_recurring_events')
-        .select('id,title,contact_name,contact_email,weekday,start_date,end_date,setup_time,location,is_active')
+        .select('id,title,contact_name,contact_email,weekday,start_date,end_date,setup_time,location,is_active,calendar_event_id')
         .order('start_date', { ascending: true });
       if (error) throw error;
       return data as RecurringEvent[];
     },
   });
 
-  async function createCalendar(id: string) {
+  async function syncCalendar(id: string, action: 'create' | 'update') {
     if (!supabase) throw new Error('Supabase not configured');
     const { data } = await supabase.auth.getSession();
     const token = data.session?.access_token;
@@ -67,7 +69,7 @@ export default function AvRecurringAdmin() {
         'x-ms-provider-token': providerToken,
         'content-type': 'application/json',
       },
-      body: JSON.stringify({ kind: 'recurring', id }),
+      body: JSON.stringify({ kind: 'recurring', id, action }),
     });
     const body = (await response.json().catch(() => ({}))) as { error?: string };
     if (!response.ok) throw new Error(body.error || 'Calendar creation failed');
@@ -97,30 +99,64 @@ export default function AvRecurringAdmin() {
 
     setSubmitting(true);
     try {
-      const { data, error: insertError } = await supabase
-        .from('av_recurring_events')
-        .insert({
-          created_by: user.id,
-          title: title.trim(),
-          contact_name: contactName.trim(),
-          contact_email: contactEmail.trim().toLowerCase(),
-          weekday: Number(weekday),
-          start_date: startDate,
-          end_date: endDate || null,
-          setup_time: setupTime,
-          location,
-        })
-        .select('id')
-        .single();
-      if (insertError) throw insertError;
+      const values = {
+        title: title.trim(),
+        contact_name: contactName.trim(),
+        contact_email: contactEmail.trim().toLowerCase(),
+        weekday: Number(weekday),
+        start_date: startDate,
+        end_date: endDate || null,
+        setup_time: setupTime,
+        location,
+      };
+      let scheduleId: string;
+      let shouldUpdateCalendar = false;
+      if (editingId) {
+        const { data, error: updateError } = await supabase
+          .from('av_recurring_events')
+          .update(values)
+          .eq('id', editingId)
+          .select('id,calendar_event_id')
+          .maybeSingle();
+        if (updateError) throw updateError;
+        if (!data) {
+          throw new Error(
+            'The recurring schedule was not updated. It may no longer exist or your account may not have permission.',
+          );
+        }
+        scheduleId = data.id;
+        shouldUpdateCalendar = Boolean(data.calendar_event_id);
+      } else {
+        const { data, error: insertError } = await supabase
+          .from('av_recurring_events')
+          .insert({
+            created_by: user.id,
+            ...values,
+          })
+          .select('id')
+          .single();
+        if (insertError) throw insertError;
+        scheduleId = data.id;
+      }
       await queryClient.invalidateQueries({ queryKey: ['av-recurring-events'] });
       try {
-        await createCalendar(data.id as string);
-        setMessage('Recurring schedule created and added to Microsoft calendar.');
+        await syncCalendar(scheduleId, shouldUpdateCalendar ? 'update' : 'create');
+        setMessage(
+          editingId
+            ? 'Recurring schedule updated and Microsoft calendar event synchronized.'
+            : 'Recurring schedule created and added to Microsoft calendar.',
+        );
       } catch (calendarError) {
-        setMessage('Recurring reminder schedule created.');
-        setError(calendarError instanceof Error ? calendarError.message : 'Calendar creation failed.');
+        setMessage(
+          editingId ? 'Recurring schedule updated.' : 'Recurring reminder schedule created.',
+        );
+        setError(
+          calendarError instanceof Error
+            ? calendarError.message
+            : 'Microsoft calendar synchronization failed.',
+        );
       }
+      setEditingId(null);
       setTitle('');
       setContactName('');
       setContactEmail('');
@@ -129,10 +165,44 @@ export default function AvRecurringAdmin() {
       setSetupTime('');
       setLocation('');
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Could not create recurring schedule.');
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : editingId
+            ? 'Could not update recurring schedule.'
+            : 'Could not create recurring schedule.',
+      );
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function editSchedule(schedule: RecurringEvent) {
+    setEditingId(schedule.id);
+    setTitle(schedule.title);
+    setContactName(schedule.contact_name);
+    setContactEmail(schedule.contact_email);
+    setWeekday(String(schedule.weekday));
+    setStartDate(schedule.start_date);
+    setEndDate(schedule.end_date ?? '');
+    setSetupTime(schedule.setup_time.slice(0, 5));
+    setLocation(schedule.location);
+    setError(null);
+    setMessage(null);
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setTitle('');
+    setContactName('');
+    setContactEmail('');
+    setWeekday('3');
+    setStartDate('');
+    setEndDate('');
+    setSetupTime('');
+    setLocation('');
+    setError(null);
+    setMessage(null);
   }
 
   return (
@@ -144,7 +214,7 @@ export default function AvRecurringAdmin() {
       {schedules.data && schedules.data.length > 0 && (
         <div className="mt-5 data-table-wrap">
           <table className="data-table">
-            <thead><tr><th>Event</th><th>Contact</th><th>Schedule</th><th>Location</th></tr></thead>
+            <thead><tr><th>Event</th><th>Contact</th><th>Schedule</th><th>Location</th><th>Actions</th></tr></thead>
             <tbody>
               {schedules.data.map((schedule) => (
                 <tr key={schedule.id}>
@@ -152,6 +222,16 @@ export default function AvRecurringAdmin() {
                   <td>{schedule.contact_name}<br /><span className="text-xs text-slate-500">{schedule.contact_email}</span></td>
                   <td>{WEEKDAYS[schedule.weekday]} at {schedule.setup_time.slice(0, 5)}<br /><span className="text-xs text-slate-500">{schedule.start_date} to {schedule.end_date || 'ongoing'}</span></td>
                   <td>{schedule.location}</td>
+                  <td>
+                    <button
+                      type="button"
+                      disabled={submitting}
+                      onClick={() => editSchedule(schedule)}
+                      className="btn-secondary px-3 py-1.5 text-sm disabled:opacity-50"
+                    >
+                      Edit
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -161,16 +241,30 @@ export default function AvRecurringAdmin() {
 
       {message && <p className="mt-5 alert-success">{message}</p>}
       {error && <p className="mt-5 alert-error">{error}</p>}
-      <form onSubmit={submit} className="mt-5 grid gap-4 md:grid-cols-2">
+      <h3 className="mt-5 text-sm font-semibold text-slate-800">
+        {editingId ? 'Edit recurring event' : 'Create recurring event'}
+      </h3>
+      <form onSubmit={submit} className="mt-3 grid gap-4 md:grid-cols-2">
         <div className="md:col-span-2"><label className="field-label">Event title</label><input required value={title} onChange={(event) => setTitle(event.target.value)} className="field" placeholder="Weekly assembly" /></div>
         <div><label className="field-label">Contact name</label><input required value={contactName} onChange={(event) => setContactName(event.target.value)} className="field" /></div>
         <div><label className="field-label">Contact email</label><input required type="email" value={contactEmail} onChange={(event) => setContactEmail(event.target.value)} className="field" /></div>
         <div><label className="field-label">Repeats every</label><select value={weekday} onChange={(event) => setWeekday(event.target.value)} className="field-select">{WEEKDAYS.map((day, index) => <option key={day} value={index}>{day}</option>)}</select></div>
         <div><label className="field-label">Set up by</label><input required type="time" value={setupTime} onChange={(event) => setSetupTime(event.target.value)} className="field" /></div>
-        <div><label className="field-label">Start date</label><input required type="date" min={localDate()} value={startDate} onChange={(event) => setStartDate(event.target.value)} className="field" /></div>
+        <div><label className="field-label">Start date</label><input required type="date" min={editingId ? undefined : localDate()} value={startDate} onChange={(event) => setStartDate(event.target.value)} className="field" /></div>
         <div><label className="field-label">End date (optional)</label><input type="date" min={startDate || localDate()} value={endDate} onChange={(event) => setEndDate(event.target.value)} className="field" /></div>
         <div className="md:col-span-2"><label className="field-label">Location</label><select required value={location} onChange={(event) => setLocation(event.target.value)} className="field-select"><option value="">Select a location</option>{LOCATIONS.map((item) => <option key={item}>{item}</option>)}</select></div>
-        <div className="md:col-span-2"><button type="submit" disabled={submitting} className="btn-primary">{submitting ? 'Creating...' : 'Create recurring event'}</button></div>
+        <div className="md:col-span-2 flex gap-2">
+          <button type="submit" disabled={submitting} className="btn-primary">
+            {submitting
+              ? editingId
+                ? 'Saving...'
+                : 'Creating...'
+              : editingId
+                ? 'Save changes'
+                : 'Create recurring event'}
+          </button>
+          {editingId && <button type="button" onClick={cancelEdit} className="btn-secondary">Cancel</button>}
+        </div>
       </form>
     </section>
   );

@@ -25,6 +25,7 @@ type RecurringEvent = {
   end_date: string | null;
   setup_time: string;
   location: string;
+  calendar_event_id: string | null;
 };
 
 const GRAPH_TIME_ZONE = 'Atlantic Standard Time';
@@ -97,6 +98,21 @@ async function createGraphEvent(providerToken: string, event: Record<string, unk
   return (await response.json()) as { id: string; webLink?: string };
 }
 
+async function updateGraphEvent(providerToken: string, id: string, event: Record<string, unknown>) {
+  const response = await fetch(`https://graph.microsoft.com/v1.0/me/events/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${providerToken}`, 'content-type': 'application/json' },
+    body: JSON.stringify(event),
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    if (response.status === 401 || response.status === 403) {
+      throw new Error('Microsoft calendar permission is unavailable. Sign out, sign in with Microsoft again, and retry.');
+    }
+    throw new Error(`Microsoft calendar update failed: ${detail}`);
+  }
+}
+
 export const handler: Handler = async (event) => {
   if (event.httpMethod !== 'POST') return json(405, { error: 'Method Not Allowed' });
   const auth = event.headers.authorization ?? event.headers.Authorization;
@@ -104,13 +120,17 @@ export const handler: Handler = async (event) => {
   const providerToken = event.headers['x-ms-provider-token'];
   if (!providerToken) return json(409, { error: 'Microsoft calendar permission is required. Sign out and sign in with Microsoft again.' });
 
-  let body: { kind?: 'request' | 'recurring'; id?: string };
+  let body: { kind?: 'request' | 'recurring'; id?: string; action?: 'create' | 'update' };
   try {
     body = JSON.parse(event.body ?? '{}') as typeof body;
   } catch {
     return json(400, { error: 'Invalid JSON' });
   }
-  if (!body.id || !['request', 'recurring'].includes(body.kind ?? '')) {
+  if (
+    !body.id ||
+    !['request', 'recurring'].includes(body.kind ?? '') ||
+    (body.action !== undefined && body.action !== 'create' && body.action !== 'update')
+  ) {
     return json(400, { error: 'Valid kind and id are required' });
   }
 
@@ -152,7 +172,9 @@ export const handler: Handler = async (event) => {
       return json(200, { ok: true, webLink: graphEvent.webLink ?? null });
     }
 
-    if (profile.role !== 'admin') return json(403, { error: 'Admins only' });
+    if (profile.role !== 'admin' && profile.role !== 'av_admin') {
+      return json(403, { error: 'AV administrators only' });
+    }
     const recurring = await selectOne<RecurringEvent>(
       'av_recurring_events',
       `id=eq.${encodeURIComponent(body.id)}&select=*`,
@@ -161,7 +183,7 @@ export const handler: Handler = async (event) => {
     const recurrenceRange = recurring.end_date
       ? { type: 'endDate', startDate: recurring.start_date, endDate: recurring.end_date, recurrenceTimeZone: GRAPH_TIME_ZONE }
       : { type: 'noEnd', startDate: recurring.start_date, recurrenceTimeZone: GRAPH_TIME_ZONE };
-    const graphEvent = await createGraphEvent(providerToken, {
+    const graphEvent = {
       subject: recurring.title,
       body: {
         contentType: 'text',
@@ -175,9 +197,19 @@ export const handler: Handler = async (event) => {
         pattern: { type: 'weekly', interval: 1, daysOfWeek: [WEEKDAYS[recurring.weekday]] },
         range: recurrenceRange,
       },
-    });
-    await patch('av_recurring_events', recurring.id, { calendar_event_id: graphEvent.id, calendar_status: 'created' });
-    return json(200, { ok: true, webLink: graphEvent.webLink ?? null });
+    };
+    if (body.action === 'update') {
+      if (!recurring.calendar_event_id) {
+        return json(409, { error: 'This recurring schedule has no Microsoft calendar event to update.' });
+      }
+      await updateGraphEvent(providerToken, recurring.calendar_event_id, graphEvent);
+      await patch('av_recurring_events', recurring.id, { calendar_status: 'created' });
+      return json(200, { ok: true });
+    }
+
+    const createdEvent = await createGraphEvent(providerToken, graphEvent);
+    await patch('av_recurring_events', recurring.id, { calendar_event_id: createdEvent.id, calendar_status: 'created' });
+    return json(200, { ok: true, webLink: createdEvent.webLink ?? null });
   } catch (error) {
     const table = body.kind === 'request' ? 'av_requests' : 'av_recurring_events';
     await patch(table, body.id, { calendar_status: 'failed' }).catch(() => undefined);

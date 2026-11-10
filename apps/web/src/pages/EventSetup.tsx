@@ -1015,6 +1015,8 @@ export default function EventSetup() {
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [editingRequestId, setEditingRequestId] = useState<string | null>(null);
+  const requestFormRef = useRef<HTMLFormElement>(null);
   const [month, setMonth] = useState(() => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1, 12);
@@ -1128,6 +1130,7 @@ export default function EventSetup() {
   const monthLabel = month.toLocaleDateString('en', { month: 'long', year: 'numeric' });
 
   function resetForm() {
+    setEditingRequestId(null);
     setEventTitle('');
     setSelectedPreset('');
     setEventDate('');
@@ -1159,6 +1162,50 @@ export default function EventSetup() {
     setFastTurnaround(false);
     setSpecialInstructions('');
     setEquipment([]);
+  }
+
+  function editRequest(request: EventSetupRequest) {
+    setEditingRequestId(request.id);
+    setEventTitle(request.event_title);
+    setSelectedPreset('');
+    setSetupType(request.setup_type);
+    setEventDate(request.event_date);
+    setSetupTime(request.setup_time.slice(0, 5));
+    setLocation(request.location);
+    setFrontRows(String(request.exam_front_rows ?? 0));
+    setFrontColumns(String(request.exam_front_columns ?? 0));
+    setBackRows(String(request.exam_back_rows ?? 0));
+    setBackColumns(String(request.exam_back_columns ?? 0));
+    setSeatRows(String(request.seat_rows ?? ''));
+    setSeatSections(String(request.seat_sections ?? ''));
+    setSeatsPerRow(String(request.seats_per_section_row ?? ''));
+    setSeatBackRowChairs(String(request.seat_back_row_chairs ?? 0));
+    setSeatPlacement(request.seat_placement);
+    setSeatSectionOffsets(request.seat_section_offsets ?? {});
+    setEventChairsRequired(request.setup_type === 'event' && request.total_seats !== null);
+    setEquipment(request.equipment ?? []);
+    setLayoutElementPositions(request.layout_element_positions ?? {});
+    setTableCount(String(request.round_table_count ?? 0));
+    setTableType(request.table_type ?? 'round');
+    setChairsPerTable(String(request.chairs_per_table ?? 0));
+    setTablesOnStage(request.tables_on_stage);
+    setRisersRequired(request.risers_required);
+    setRiserRows(String(request.riser_rows ?? ''));
+    setPodiumRequired(request.podium_required);
+    const hasWeeklyRepeat = request.recurrence_days.length > 0;
+    const additionalDates = request.recurrence_dates ?? [];
+    setRepeatEnabled(hasWeeklyRepeat || additionalDates.length > 0);
+    setRepeatMode(hasWeeklyRepeat ? 'weekly' : 'specific_dates');
+    setRepeatDays(request.recurrence_days ?? []);
+    setRepeatEndDate(request.recurrence_end_date ?? '');
+    setSpecificDates(additionalDates.length > 0 ? [...additionalDates, ''] : ['']);
+    setFastTurnaround(request.fast_turnaround);
+    setSpecialInstructions(request.special_instructions ?? '');
+    setError(null);
+    setSuccess(null);
+    setSelectedRequestId(null);
+    setSelectedOccurrenceDate(null);
+    requestFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   function applyPreset(preset: string) {
@@ -1274,53 +1321,79 @@ export default function EventSetup() {
       return;
     }
 
+    const requestValues = {
+      event_title: eventTitle.trim(),
+      setup_type: setupType,
+      event_date: eventDate,
+      setup_time: setupTime,
+      location: location.trim(),
+      exam_front_rows: setupType === 'exam' && frontRowCount ? frontRowCount : null,
+      exam_front_columns: setupType === 'exam' && frontRowCount ? frontColumnCount : null,
+      exam_back_rows: setupType === 'exam' && backRowCount ? backRowCount : null,
+      exam_back_columns: setupType === 'exam' && backRowCount ? backColumnCount : null,
+      total_seats: needsSeatLayout ? seatingLayout?.total : null,
+      seat_rows: needsSeatLayout ? seatingLayout?.rows : null,
+      seat_sections: needsSeatLayout ? seatingLayout?.sections : null,
+      seats_per_section_row: needsSeatLayout ? seatingLayout?.perRow : null,
+      seat_back_row_chairs: needsSeatLayout ? numeric(seatBackRowChairs) : 0,
+      equipment,
+      seat_placement:
+        seatingLayout?.sections !== undefined && seatingLayout.sections <= 2
+          ? seatPlacement
+          : 'center',
+      seat_section_offsets: needsSeatLayout ? seatSectionOffsets : {},
+      layout_element_positions: Object.fromEntries(
+        layoutElements.map((element) => [element.id, element.position]),
+      ),
+      round_table_count: tableTotal,
+      table_type: tableType,
+      chairs_per_table: tableTotal ? chairCount : 0,
+      tables_on_stage: tablesOnStage,
+      risers_required: risersRequired,
+      riser_rows: risersRequired ? numeric(riserRows) : null,
+      podium_required: podiumRequired,
+      recurrence_days: repeatEnabled && repeatMode === 'weekly' ? repeatDays : [],
+      recurrence_end_date: repeatEnabled && repeatMode === 'weekly' ? repeatEndDate : null,
+      recurrence_dates: repeatEnabled && repeatMode === 'specific_dates' ? additionalDates : [],
+      fast_turnaround: fastTurnaround,
+      special_instructions: specialInstructions.trim() || null,
+    };
+
     setSubmitting(true);
     try {
-      const { error: insertError } = await supabase.from('event_setup_requests').insert({
-        requester_id: user.id,
-        event_title: eventTitle.trim(),
-        setup_type: setupType,
-        event_date: eventDate,
-        setup_time: setupTime,
-        location: location.trim(),
-        exam_front_rows: setupType === 'exam' && frontRowCount ? frontRowCount : null,
-        exam_front_columns: setupType === 'exam' && frontRowCount ? frontColumnCount : null,
-        exam_back_rows: setupType === 'exam' && backRowCount ? backRowCount : null,
-        exam_back_columns: setupType === 'exam' && backRowCount ? backColumnCount : null,
-        total_seats: needsSeatLayout ? seatingLayout?.total : null,
-        seat_rows: needsSeatLayout ? seatingLayout?.rows : null,
-        seat_sections: needsSeatLayout ? seatingLayout?.sections : null,
-        seats_per_section_row: needsSeatLayout ? seatingLayout?.perRow : null,
-        seat_back_row_chairs: needsSeatLayout ? numeric(seatBackRowChairs) : 0,
-        equipment,
-        seat_placement:
-          seatingLayout?.sections !== undefined && seatingLayout.sections <= 2
-            ? seatPlacement
-            : 'center',
-        seat_section_offsets: needsSeatLayout ? seatSectionOffsets : {},
-        layout_element_positions: Object.fromEntries(
-          layoutElements.map((element) => [element.id, element.position]),
-        ),
-        round_table_count: tableTotal,
-        table_type: tableType,
-        chairs_per_table: tableTotal ? chairCount : 0,
-        tables_on_stage: tablesOnStage,
-        risers_required: risersRequired,
-        riser_rows: risersRequired ? numeric(riserRows) : null,
-        podium_required: podiumRequired,
-        recurrence_days: repeatEnabled && repeatMode === 'weekly' ? repeatDays : [],
-        recurrence_end_date: repeatEnabled && repeatMode === 'weekly' ? repeatEndDate : null,
-        recurrence_dates: repeatEnabled && repeatMode === 'specific_dates' ? additionalDates : [],
-        fast_turnaround: fastTurnaround,
-        special_instructions: specialInstructions.trim() || null,
-      });
-      if (insertError) throw insertError;
+      if (editingRequestId) {
+        const { data, error: updateError } = await supabase
+          .from('event_setup_requests')
+          .update(requestValues)
+          .eq('id', editingRequestId)
+          .select('id')
+          .maybeSingle();
+        if (updateError) throw updateError;
+        if (!data) {
+          throw new Error(
+            'The request was not updated. It may have changed or your role may not have access.',
+          );
+        }
+      } else {
+        const { error: insertError } = await supabase
+          .from('event_setup_requests')
+          .insert({ ...requestValues, requester_id: user.id });
+        if (insertError) throw insertError;
+      }
       await queryClient.invalidateQueries({ queryKey: ['event-setup-requests', user.id] });
-      setSuccess('Your Event Setup request was submitted to the Facilities team.');
+      setSuccess(
+        editingRequestId
+          ? 'Event Setup request updated.'
+          : 'Your Event Setup request was submitted to the Facilities team.',
+      );
       resetForm();
     } catch (caught) {
       setError(
-        caught instanceof Error ? caught.message : 'Could not submit the Event Setup request.',
+        caught instanceof Error
+          ? caught.message
+          : editingRequestId
+            ? 'Could not update the Event Setup request.'
+            : 'Could not submit the Event Setup request.',
       );
     } finally {
       setSubmitting(false);
@@ -1390,13 +1463,19 @@ export default function EventSetup() {
       )}
 
       <form
+        ref={requestFormRef}
+        id="event-setup-form"
         onSubmit={submitRequest}
         className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5"
       >
         <div>
-          <h2 className="text-base font-semibold text-brand-navy">Request setup</h2>
+          <h2 className="text-base font-semibold text-brand-navy">
+            {editingRequestId ? 'Edit setup request' : 'Request setup'}
+          </h2>
           <p className="mt-0.5 text-xs text-slate-600">
-            Choose a setup and see the layout preview below.
+            {editingRequestId
+              ? 'Update the event details and layout.'
+              : 'Choose a setup and see the layout preview below.'}
           </p>
         </div>
 
@@ -1463,7 +1542,7 @@ export default function EventSetup() {
               id="event-date"
               required
               type="date"
-              min={localDate()}
+              min={editingRequestId ? undefined : localDate()}
               value={eventDate}
               onChange={(event) => setEventDate(event.target.value)}
               className="field"
@@ -2153,8 +2232,19 @@ export default function EventSetup() {
           disabled={submitting}
           className="btn-primary disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {submitting ? 'Submitting…' : 'Submit Event Setup request'}
+          {submitting
+            ? editingRequestId
+              ? 'Saving…'
+              : 'Submitting…'
+            : editingRequestId
+              ? 'Save changes'
+              : 'Submit Event Setup request'}
         </button>
+        {editingRequestId && (
+          <button type="button" onClick={resetForm} className="btn-secondary ml-2">
+            Cancel editing
+          </button>
+        )}
       </form>
 
       {canManage && (
@@ -2321,6 +2411,16 @@ export default function EventSetup() {
                   )}
                 </div>
                 <div className="flex items-center gap-2">
+                  {canManage && (
+                    <button
+                      type="button"
+                      disabled={submitting}
+                      onClick={() => editRequest(selectedRequest)}
+                      className="btn-secondary px-3 py-1.5 text-sm disabled:opacity-50"
+                    >
+                      Edit request
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={async () => {
