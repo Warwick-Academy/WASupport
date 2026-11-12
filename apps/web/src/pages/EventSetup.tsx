@@ -1017,10 +1017,11 @@ export default function EventSetup() {
   const [success, setSuccess] = useState<string | null>(null);
   const [editingRequestId, setEditingRequestId] = useState<string | null>(null);
   const requestFormRef = useRef<HTMLFormElement>(null);
-  const [month, setMonth] = useState(() => {
+  const [calendarDate, setCalendarDate] = useState(() => {
     const now = new Date();
-    return new Date(now.getFullYear(), now.getMonth(), 1, 12);
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12);
   });
+  const [calendarView, setCalendarView] = useState<'month' | 'week'>('month');
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [selectedOccurrenceDate, setSelectedOccurrenceDate] = useState<string | null>(null);
 
@@ -1080,27 +1081,78 @@ export default function EventSetup() {
     setLayoutElementPositions((current) => ({ ...current, ...positions }));
   };
 
+  const month = useMemo(
+    () => new Date(calendarDate.getFullYear(), calendarDate.getMonth(), 1, 12),
+    [calendarDate],
+  );
+  const weekStart = useMemo(
+    () =>
+      new Date(
+        calendarDate.getFullYear(),
+        calendarDate.getMonth(),
+        calendarDate.getDate() - calendarDate.getDay(),
+        12,
+      ),
+    [calendarDate],
+  );
+  const weekEnd = new Date(
+    weekStart.getFullYear(),
+    weekStart.getMonth(),
+    weekStart.getDate() + 6,
+    12,
+  );
   const requestsByDate = useMemo(() => {
     const grouped = new Map<string, EventSetupRequest[]>();
+    const months = [month];
+    if (calendarView === 'week') {
+      months.length = 0;
+      months.push(new Date(weekStart.getFullYear(), weekStart.getMonth(), 1, 12));
+      const end = new Date(
+        weekStart.getFullYear(),
+        weekStart.getMonth(),
+        weekStart.getDate() + 6,
+        12,
+      );
+      if (
+        end.getMonth() !== weekStart.getMonth() ||
+        end.getFullYear() !== weekStart.getFullYear()
+      ) {
+        months.push(new Date(end.getFullYear(), end.getMonth(), 1, 12));
+      }
+    }
     for (const request of requests.data ?? []) {
-      for (const date of requestDatesForMonth(request, month)) {
-        const onDate = grouped.get(date) ?? [];
-        onDate.push(request);
-        grouped.set(date, onDate);
+      for (const visibleMonth of months) {
+        for (const date of requestDatesForMonth(request, visibleMonth)) {
+          const onDate = grouped.get(date) ?? [];
+          onDate.push(request);
+          grouped.set(date, onDate);
+        }
       }
     }
     return grouped;
-  }, [month, requests.data]);
+  }, [calendarView, month, weekStart, requests.data]);
 
   const firstWeekday = month.getDay();
   const daysInMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
   const cellCount = Math.ceil((firstWeekday + daysInMonth) / 7) * 7;
-  const cells = Array.from({ length: cellCount }, (_, index) => {
-    const day = index - firstWeekday + 1;
-    return day > 0 && day <= daysInMonth
-      ? new Date(month.getFullYear(), month.getMonth(), day, 12)
-      : null;
-  });
+  const cells =
+    calendarView === 'week'
+      ? Array.from(
+          { length: 7 },
+          (_, index) =>
+            new Date(
+              weekStart.getFullYear(),
+              weekStart.getMonth(),
+              weekStart.getDate() + index,
+              12,
+            ),
+        )
+      : Array.from({ length: cellCount }, (_, index) => {
+          const day = index - firstWeekday + 1;
+          return day > 0 && day <= daysInMonth
+            ? new Date(month.getFullYear(), month.getMonth(), day, 12)
+            : null;
+        });
   const selectedRequest =
     (requests.data ?? []).find((request) => request.id === selectedRequestId) ?? null;
   const selectedLayoutElements = selectedRequest
@@ -1128,6 +1180,15 @@ export default function EventSetup() {
       hasUpcomingOccurrence(request, localDate()),
   );
   const monthLabel = month.toLocaleDateString('en', { month: 'long', year: 'numeric' });
+  const weekLabel = `${weekStart.toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' })} – ${weekEnd.toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+
+  function navigateCalendar(direction: -1 | 1) {
+    setCalendarDate((current) =>
+      calendarView === 'week'
+        ? new Date(current.getFullYear(), current.getMonth(), current.getDate() + direction * 7, 12)
+        : new Date(current.getFullYear(), current.getMonth() + direction, 1, 12),
+    );
+  }
 
   function resetForm() {
     setEditingRequestId(null);
@@ -2262,24 +2323,44 @@ export default function EventSetup() {
                 check availability.
               </p>
             </div>
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                aria-label="Previous month"
-                onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1, 12))}
-                className="rounded-md border border-slate-300 p-2 hover:bg-slate-50"
-              >
-                <ChevronLeft size={18} />
-              </button>
-              <h3 className="min-w-36 text-center font-semibold text-slate-800">{monthLabel}</h3>
-              <button
-                type="button"
-                aria-label="Next month"
-                onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1, 12))}
-                className="rounded-md border border-slate-300 p-2 hover:bg-slate-50"
-              >
-                <ChevronRight size={18} />
-              </button>
+            <div className="flex flex-wrap items-center gap-3">
+              <div role="group" aria-label="Calendar view" className="flex gap-1">
+                {(['month', 'week'] as const).map((view) => (
+                  <button
+                    key={view}
+                    type="button"
+                    aria-pressed={calendarView === view}
+                    onClick={() => setCalendarView(view)}
+                    className={calendarView === view ? 'btn-primary' : 'btn-ghost'}
+                  >
+                    {view === 'month' ? 'Month' : 'Week'}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  aria-label={`Previous ${calendarView}`}
+                  onClick={() => navigateCalendar(-1)}
+                  className="rounded-md border border-slate-300 p-2 hover:bg-slate-50"
+                >
+                  <ChevronLeft size={18} />
+                </button>
+                <h3
+                  aria-live="polite"
+                  className="min-w-36 text-center font-semibold text-slate-800"
+                >
+                  {calendarView === 'month' ? monthLabel : weekLabel}
+                </h3>
+                <button
+                  type="button"
+                  aria-label={`Next ${calendarView}`}
+                  onClick={() => navigateCalendar(1)}
+                  className="rounded-md border border-slate-300 p-2 hover:bg-slate-50"
+                >
+                  <ChevronRight size={18} />
+                </button>
+              </div>
             </div>
           </div>
           {requests.isPending && <p className="text-sm text-slate-500">Loading requests…</p>}
@@ -2291,59 +2372,67 @@ export default function EventSetup() {
             </p>
           )}
           {!requests.isPending && !requests.error && (
-            <div className="grid grid-cols-7 overflow-hidden rounded-lg border border-slate-200">
-              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
-                <div
-                  key={day}
-                  className="border-b border-r border-slate-200 bg-slate-50 p-2 text-center text-xs font-semibold text-slate-600"
-                >
-                  {day}
-                </div>
-              ))}
-              {cells.map((date, index) => {
-                const key = date ? dateKey(date) : `empty-${index}`;
-                const dayRequests = date ? (requestsByDate.get(key) ?? []) : [];
-                return (
+            <div className="overflow-x-auto rounded-lg border border-slate-200">
+              <div
+                className={`grid grid-cols-7 overflow-hidden ${calendarView === 'week' ? 'min-w-[700px]' : ''}`}
+              >
+                {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
                   <div
-                    key={key}
-                    className={`min-h-24 border-b border-r border-slate-200 p-1.5 sm:min-h-28 sm:p-2 ${date ? 'bg-white' : 'bg-slate-50'}`}
+                    key={day}
+                    className="border-b border-r border-slate-200 bg-slate-50 p-2 text-center text-xs font-semibold text-slate-600"
                   >
-                    {date && (
-                      <>
-                        <span
-                          className={`text-xs ${key === dateKey(new Date()) ? 'font-bold text-blue-700' : 'text-slate-600'}`}
-                        >
-                          {date.getDate()}
-                        </span>
-                        <div className="mt-1 space-y-1">
-                          {dayRequests.slice(0, 3).map((request) => (
-                            <button
-                              key={request.id}
-                              type="button"
-                              onClick={() => {
-                                setSelectedRequestId(request.id);
-                                setSelectedOccurrenceDate(key);
-                              }}
-                              className={`block w-full truncate rounded px-1.5 py-1 text-left text-[10px] sm:text-xs ${request.fast_turnaround ? 'bg-amber-100 text-amber-950' : 'bg-blue-50 text-blue-900'}`}
-                              title={`${request.event_title} · ${request.setup_time.slice(0, 5)}${request.fast_turnaround ? ' · Fast turnaround' : ''}`}
-                            >
-                              {request.fast_turnaround && (
-                                <span className="font-bold">Alert · </span>
-                              )}
-                              {request.setup_time.slice(0, 5)} {request.event_title}
-                            </button>
-                          ))}
-                          {dayRequests.length > 3 && (
-                            <p className="px-1 text-[10px] text-slate-500">
-                              +{dayRequests.length - 3} more
-                            </p>
-                          )}
-                        </div>
-                      </>
-                    )}
+                    {day}
                   </div>
-                );
-              })}
+                ))}
+                {cells.map((date, index) => {
+                  const key = date ? dateKey(date) : `empty-${index}`;
+                  const dayRequests = date ? (requestsByDate.get(key) ?? []) : [];
+                  return (
+                    <div
+                      key={key}
+                      className={`min-h-24 border-b border-r border-slate-200 p-1.5 sm:min-h-28 sm:p-2 ${calendarView === 'week' ? 'sm:min-h-48' : ''} ${date ? 'bg-white' : 'bg-slate-50'}`}
+                    >
+                      {date && (
+                        <>
+                          <span
+                            className={`text-xs ${key === dateKey(new Date()) ? 'font-bold text-blue-700' : 'text-slate-600'}`}
+                          >
+                            {calendarView === 'week'
+                              ? date.toLocaleDateString('en', { month: 'short', day: 'numeric' })
+                              : date.getDate()}
+                          </span>
+                          <div className="mt-1 space-y-1">
+                            {(calendarView === 'week' ? dayRequests : dayRequests.slice(0, 3)).map(
+                              (request) => (
+                                <button
+                                  key={request.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedRequestId(request.id);
+                                    setSelectedOccurrenceDate(key);
+                                  }}
+                                  className={`block w-full truncate rounded px-1.5 py-1 text-left text-[10px] sm:text-xs ${request.fast_turnaround ? 'bg-amber-100 text-amber-950' : 'bg-blue-50 text-blue-900'}`}
+                                  title={`${request.event_title} · ${request.setup_time.slice(0, 5)}${request.fast_turnaround ? ' · Fast turnaround' : ''}`}
+                                >
+                                  {request.fast_turnaround && (
+                                    <span className="font-bold">Alert · </span>
+                                  )}
+                                  {request.setup_time.slice(0, 5)} {request.event_title}
+                                </button>
+                              ),
+                            )}
+                            {calendarView === 'month' && dayRequests.length > 3 && (
+                              <p className="px-1 text-[10px] text-slate-500">
+                                +{dayRequests.length - 3} more
+                              </p>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
           {selectedRequest && (

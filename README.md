@@ -285,6 +285,8 @@ flag. Facilities technicians, managers, and admins can review requests and updat
 their status or edit an existing request from its calendar details.
 
 The Event Setup calendar and request list are shown only to Facilities reviewers.
+The calendar can be switched between month and week views, with navigation for
+the selected period. Week view shows every request for each day.
 This is a request schedule and does not reserve venues or check availability.
 Assembly and custom layouts support editable seating sections, rows, and seats per
 row with a generated seat map. Event requests can optionally include the same
